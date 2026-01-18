@@ -205,3 +205,13 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Custom ignores
+data/
+outputs/
+notebooks/.ipynb_checkpoints/
+prompt.txt
+*.parquet
+*.png
+*.pdf
+.env
