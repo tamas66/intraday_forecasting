@@ -78,49 +78,120 @@ Each step is modular to encourage experimentation and reuse.
 
 ---
 
+```markdown
 ## 🛠 Setup and Execution
 
 ### 1. Prerequisites
-
-Ensure you have **Python 3.11 or higher** installed. It is highly recommended to use a virtual environment to manage dependencies:
+This project requires **Python 3.11 or higher**. To ensure a reproducible research environment and avoid dependency conflicts with global packages, it is strongly recommended to use a Python virtual environment (`venv`).
 
 ```powershell
-# Create a virtual environment
+# Navigate to the project root
+cd C:\Users\tamas\Documents\GitHub\thesis
+
+# Create a virtual environment named 'venv'
 python -m venv venv
 
-# Activate the environment
-# On Windows:
+# Activate the virtual environment
+# On Windows (PowerShell):
 .\venv\Scripts\activate
+
+# On Windows (Command Prompt):
+.\venv\Scripts\Projects\activate.bat
 
 # On macOS/Linux:
 source venv/bin/activate
 
 ```
-### 2. Setup
-Before running the pipeline, initialize the local directory structure.
-This script creates the required data/ and outputs/ folders, which are excluded from Git:
-``` python src/config.py ```
 
-Install the required Python dependencies using the provided requirements.txt file:
-``` pip install -r requirements.txt ```
+### 2. Initialization and Installation
+
+The project follows a "clean repository" philosophy where ephemeral data and large binary outputs are generated locally rather than stored in version control.
+
+**Step A: Initialize Directory Structure**
+Run the configuration script to build the local file system. This script creates the `data/` and `outputs/` hierarchies required by the source code.
+
+```powershell
+python src/config.py
+
+```
+
+**Step B: Install Dependencies**
+With the virtual environment active, install the necessary libraries for data processing, statistical modeling, and deep learning.
+
+```powershell
+pip install --upgrade pip
+pip install -r requirements.txt
+
+```
+
+> **Note on Environment Variables:** This project utilizes a `.env` file for sensitive configurations (such as API keys for ENTSO-E or database credentials). Ensure a `.env` file exists in the root directory before attempting to fetch live data.
+
+---
 
 ### 3. Project Structure
 
-The project is organized to clearly separate data logic, modeling, and exploratory analysis:
+The repository is structured to separate raw data, processed features, and modeling logic. This modularity allows for independent testing of the forecasting components.
+
+```text
 thesis/
-├── data/               # (Auto-generated) Local Parquet storage
-├── docs/               # Thesis focus and documentation
-├── notebooks/          # Jupyter notebooks for EDA and inspection
-├── outputs/            # (Auto-generated) Plots and evaluation results
-├── src/                # Source code
-│   ├── helpers/        # Statistics, API calls, and data cleaning
-│   ├── models/         # Parametric and ANN model architectures
-│   ├── config.py       # Global settings and folder initialization
-│   ├── data.py         # Data loading and processing logic
-│   ├── train.py        # Model training entry point
-│   └── evaluate.py     # Performance metric calculations
-├── .gitignore          # Excludes data, cache, and large files
-└── requirements.txt    # Python dependencies
+├── data/               # Local storage for datasets (Git-ignored)
+│   ├── raw/            # Original yearly Parquet files (2015-2025)
+│   ├── processed/      # Cleaned and feature-engineered Parquet files
+│   └── final/          # Merged datasets ready for model input
+├── docs/               # Academic documentation and thesis focus papers
+├── notebooks/          # Exploratory Data Analysis (EDA) and prototyping
+│   ├── 01_Inspection.ipynb     # Initial data validation
+│   ├── 02_Danish_EDA.ipynb     # Price/demand analysis for DK region
+│   └── 03_British_EDA.ipynb    # Price/demand analysis for UK region
+├── outputs/            # Generated figures, logs, and model weights
+│   ├── eda/            # Statistical plots (ACF/PACF, correlations)
+│   └── models/         # Saved model states and performance metrics
+├── src/                # Core Python source code
+│   ├── helpers/        # Utility modules (API, statistics, eval metrics)
+│   ├── models/         # Architecture definitions (Parametric & ANN)
+│   ├── config.py       # Global constants and system initialization
+│   ├── data.py         # ETL pipeline logic
+│   ├── train.py        # Main training loop script
+│   └── evaluate.py     # Model validation and comparison logic
+├── .gitignore          # Rules for excluding large data and cache files
+├── README.md           # Project overview and setup instructions
+└── requirements.txt    # List of required Python packages
+
+```
+
+---
+
+### 4. Running the Pipeline
+
+The forecasting workflow is designed to be executed sequentially. Each stage relies on the outputs generated by the previous step.
+
+**Stage 1: Data Acquisition and Feature Engineering**
+Transform the raw yearly Parquet files into a unified format suitable for time-series modeling.
+
+```powershell
+python src/data.py
+
+```
+
+**Stage 2: Model Training**
+Fit both the Parametric (statistical) and ANN (Artificial Neural Network) models. This will generate model weights in the `outputs/models/` directory.
+
+```powershell
+python src/train.py
+
+```
+
+**Stage 3: Evaluation and Benchmarking**
+Run the evaluation suite to calculate performance metrics (MAE, RMSE, sMAPE) and generate comparison visualizations between the different forecasting approaches.
+
+```powershell
+python src/evaluate.py
+
+```
+
+```
+
+```
 
 ## Intended Audience
 
