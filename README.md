@@ -78,7 +78,6 @@ Each step is modular to encourage experimentation and reuse.
 
 ---
 
-```markdown
 ## 🛠 Setup and Execution
 
 ### 1. Prerequisites
