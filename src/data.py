@@ -1,11 +1,12 @@
 import pandas as pd
+import numpy as np
 from datetime import datetime, timedelta
 import config as cfg
-import helpers.api_calls as api
-import helpers.data_functions as prep
+import helpers.api as api
+import helpers.transform as prep
 import logging
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Optional
 """
 Data pipeline for Great Britain power market data.
 
@@ -482,34 +483,124 @@ def load_and_save_working_subset(
     
     return df_subset
 
-def load_train_test_split(
-    train_start: datetime | str,
-    train_end: datetime | str,
-    test_start: datetime | str,
-    test_end: datetime | str,
-    stage: Literal["raw", "processed"] = "processed",
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+# src/data/loader.py - Enhanced version
+
+def load_parametric_dataset(
+    data: Optional[pd.DataFrame] = None,
+    file_path: Optional[str] = None,
+    target: Literal["level", "spread"] = "level",
+    drop_na: bool = True,
+    train_end_date: Optional[str] = None,
+    test_start_date: Optional[str] = None,
+    verbose: bool = True,
+) -> pd.DataFrame:
     """
-    Load train and test sets for time series modeling.
+    Prepare a single modelling dataframe for parametric electricity price models.
     
-    Parameters
-    ----------
-    train_start, train_end : datetime or str
-        Training period
-    test_start, test_end : datetime or str
-        Test period
-    stage : {"raw", "processed"}
-        Which stage to load from
-        
     Returns
     -------
-    tuple of pd.DataFrame
-        (train_df, test_df)
+    pd.DataFrame or tuple
+        If train/test dates provided, returns (train_df, test_df)
+        Otherwise returns single dataframe
     """
-    train_df = load_date_range(train_start, train_end, stage=stage)
-    test_df = load_date_range(test_start, test_end, stage=stage)
     
-    return train_df, test_df
+    if data is None and file_path is None:
+        raise ValueError("Either `data` or `file_path` must be provided.")
+
+    if data is None:
+        if file_path.endswith(".parquet"):
+            df = pd.read_parquet(file_path)
+        else:
+            df = pd.read_csv(file_path, parse_dates=True, index_col=0)
+    else:
+        df = data.copy()
+
+    # Ensure datetime index
+    if not isinstance(df.index, pd.DatetimeIndex):
+        try:
+            df.index = pd.to_datetime(df.index)
+        except:
+            raise ValueError("Index must be convertible to DatetimeIndex")
+    
+    df = df.sort_index()
+    
+    if verbose:
+        print(f"Loaded {len(df)} rows from {df.index.min()} to {df.index.max()}")
+
+    # Target construction
+    df["id_da_spread"] = df["intraday_wap"] - df["da_price"]
+
+    if target == "level":
+        df["y"] = df["intraday_wap"]
+    elif target == "spread":
+        df["y"] = df["id_da_spread"]
+    else:
+        raise ValueError("target must be either 'level' or 'spread'")
+
+    # Forecast / outturn errors
+    df["demand_error"] = df["demand_actual"] - df["demand_da_forecast"]
+    df["wind_error"] = df["wind_outturn"] - df["wind_forecast_ng"]
+    df["solar_error"] = df["solar_outturn"] - df["solar_forecast_ng"]
+
+    # Endogenous lags
+    df["y_lag1"] = df["y"].shift(1)
+    df["y_lag24"] = df["y"].shift(24)
+
+    # Exogenous lags
+    for var in ["demand_actual", "wind_outturn"]:
+        df[f"{var}_lag1"] = df[var].shift(1)
+        df[f"{var}_lag24"] = df[var].shift(24)
+
+    df["solar_outturn_lag1"] = df["solar_outturn"].shift(1)
+
+    # Calendar features - create if missing
+    if "hour" not in df.columns:
+        df["hour"] = df.index.hour
+    
+    if "hour_sin" not in df.columns:
+        df["hour_sin"] = np.sin(2 * np.pi * df["hour"] / 24)
+        df["hour_cos"] = np.cos(2 * np.pi * df["hour"] / 24)
+    
+    if "dow_sin" not in df.columns:
+        dow = df.index.dayofweek
+        df["dow_sin"] = np.sin(2 * np.pi * dow / 7)
+        df["dow_cos"] = np.cos(2 * np.pi * dow / 7)
+    
+    if "is_weekend" not in df.columns:
+        df["is_weekend"] = (df.index.dayofweek >= 5).astype(int)
+
+    # Variance-equation regressors
+    df["abs_demand_error"] = df["demand_error"].abs()
+    df["abs_wind_error"] = df["wind_error"].abs()
+    df["abs_solar_error"] = df["solar_error"].abs()
+    df["abs_id_da_spread"] = df["id_da_spread"].abs()
+
+    # Peak-hour volatility dummy
+    df["is_peak_15_18"] = df["hour"].between(15, 18).astype(int)
+
+    # Feature exclusion for spread model
+    if target == "spread":
+        df = df.drop(columns=["da_price"], errors="ignore")
+
+    # Clean data
+    if drop_na:
+        initial_len = len(df)
+        df = df.dropna()
+        if verbose:
+            print(f"Dropped {initial_len - len(df)} rows with NA values")
+
+    # Split if requested
+    if train_end_date and test_start_date:
+        train_df = df[df.index <= train_end_date].copy()
+        test_df = df[df.index >= test_start_date].copy()
+        
+        if verbose:
+            print(f"Train set: {len(train_df)} rows ({train_df.index.min()} to {train_df.index.max()})")
+            print(f"Test set: {len(test_df)} rows ({test_df.index.min()} to {test_df.index.max()})")
+        
+        return train_df, test_df
+
+    return df
 
 
 # ======================
@@ -517,4 +608,4 @@ def load_train_test_split(
 # ======================
 
 if __name__ == "__main__":
-    load_and_save_working_subset("2021-01-01", "2025-12-31", features="core")
+    load_and_save_working_subset("2020-01-01", "2025-12-31", features="core")
