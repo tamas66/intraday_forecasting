@@ -99,4 +99,17 @@ BASELINE_FEATURES = [
 ]
 
 
+def initialize_directories():
+    directories = [
+        'data/raw',
+        'data/processed',
+        'data/final',
+        'outputs/eda',
+        'outputs/models'
+    ]
+    for directory in directories:
+        os.makedirs(directory, exist_ok=True)
+        print(f"Verified directory: {directory}")
 
+if __name__ == "__main__":
+    initialize_directories()

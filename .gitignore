@@ -208,6 +208,7 @@ __marimo__/
 
 # Custom ignores
 data/
+thesis_documents/
 outputs/
 notebooks/.ipynb_checkpoints/
 prompt.txt
