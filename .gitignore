@@ -210,7 +210,7 @@ __marimo__/
 data/
 thesis_documents/
 outputs/
-notebooks/.ipynb_checkpoints/
+notebooks/
 prompt.txt
 *.parquet
 *.png
