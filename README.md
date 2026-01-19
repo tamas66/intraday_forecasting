@@ -168,7 +168,7 @@ The forecasting workflow is designed to be executed sequentially. Each stage rel
 Transform the raw yearly Parquet files into a unified format suitable for time-series modeling.
 
 ```powershell
-python src/data.py
+python src/preprocess.py
 
 ```
 

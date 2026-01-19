@@ -20,6 +20,8 @@ RAW_DATA_DIR = Path("data/raw")
 PROCESSED_DATA_DIR = Path("data/processed")
 FINAL_DATA_DIR = Path("data/final")
 RESULTS_DIR = Path("outputs/results")
+MODELS_DIR = Path("models")
+EDA_DIR = Path("outputs/eda")
 
 # Dataframe Settings
 INDEX_NAME = "timestamp"

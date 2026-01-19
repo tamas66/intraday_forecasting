@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from typing import List
+from typing import List, Tuple, Optional
 from config import TZ, INDEX_NAME
 
 # ======================
@@ -395,6 +395,117 @@ def build_feature_dataframe(
 
     return df
 
+
+def create_sequences(
+    data: np.ndarray,
+    sequence_length: int,
+    forecast_horizon: int = 1,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Create sequences for time series forecasting.
+    
+    Parameters
+    ----------
+    data : np.ndarray
+        Input data of shape (n_samples, n_features) or (n_samples,)
+    sequence_length : int
+        Length of input sequences (lookback window)
+    forecast_horizon : int
+        Steps ahead to forecast (default: 1)
+    
+    Returns
+    -------
+    tuple
+        (X_sequences, y_targets)
+        X: shape (n_sequences, sequence_length, n_features)
+        y: shape (n_sequences,) or (n_sequences, n_features)
+    """
+    if data.ndim == 1:
+        data = data.reshape(-1, 1)
+    
+    X, y = [], []
+    
+    for i in range(len(data) - sequence_length - forecast_horizon + 1):
+        X.append(data[i:i + sequence_length])
+        y.append(data[i + sequence_length + forecast_horizon - 1])
+    
+    return np.array(X), np.array(y)
+
+
+def align_sequences_with_index(
+    df: pd.DataFrame,
+    feature_cols: List[str],
+    target_col: str,
+    sequence_length: int,
+) -> Tuple[np.ndarray, np.ndarray, pd.DatetimeIndex]:
+    """
+    Create sequences and maintain alignment with datetime index.
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input dataframe with datetime index
+    feature_cols : List[str]
+        Column names to use as features
+    target_col : str
+        Column name for target variable
+    sequence_length : int
+        Length of lookback window
+    
+    Returns
+    -------
+    tuple
+        (X_sequences, y_targets, timestamps)
+        timestamps align with y_targets (i.e., prediction times)
+    """
+    X_data = df[feature_cols].values
+    y_data = df[target_col].values
+    
+    X_seq, y_seq = create_sequences(X_data, sequence_length)
+    
+    # Timestamps for predictions (t+1 for each sequence ending at t)
+    timestamps = df.index[sequence_length:]
+    
+    return X_seq, y_seq, timestamps
+
+
+def create_sample_weights(
+    timestamps: pd.DatetimeIndex,
+    peak_hours: Tuple[int, int] = (15, 18),
+    peak_weight: float = 2.0,
+    weekend_weight: float = 1.0,
+) -> np.ndarray:
+    """
+    Create sample weights based on time characteristics.
+    
+    Parameters
+    ----------
+    timestamps : pd.DatetimeIndex
+        Timestamps for each sample
+    peak_hours : tuple
+        (start_hour, end_hour) inclusive for peak period
+    peak_weight : float
+        Weight multiplier for peak hours
+    weekend_weight : float
+        Weight multiplier for weekends
+    
+    Returns
+    -------
+    np.ndarray
+        Sample weights
+    """
+    weights = np.ones(len(timestamps))
+    
+    # Peak hours
+    hours = timestamps.hour
+    is_peak = (hours >= peak_hours[0]) & (hours <= peak_hours[1])
+    weights[is_peak] *= peak_weight
+    
+    # Weekends
+    is_weekend = timestamps.dayofweek >= 5
+    weights[is_weekend] *= weekend_weight
+    
+    return weights
 
 if __name__ == "__main__":
     print("This module provides helper functions for data preparation and feature engineering.")
