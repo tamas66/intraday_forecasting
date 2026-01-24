@@ -3,14 +3,18 @@ import json
 
 import pandas as pd
 import matplotlib.pyplot as plt
+from omegaconf import DictConfig
+import hydra
 
 from evaluation.compare import run_comparison
-from config import RESULTS_DIR
 
 
-def _plot_fixed_split(results: dict, target: str):
+# ======================================================
+# PLOTTING
+# ======================================================
+
+def _plot_fixed_split(cfg: DictConfig, results: dict, target: str):
     plt.figure(figsize=(14, 6))
-
     fixed_models = {
         k: v for k, v in results.items()
         if v.get("evaluation") == "fixed_split"
@@ -33,35 +37,54 @@ def _plot_fixed_split(results: dict, target: str):
     plt.legend()
     plt.tight_layout()
 
-    out = RESULTS_DIR / f"forecast_comparison_fixed_{target}.png"
+    out = Path(cfg.data.paths.results_dir) / f"forecast_comparison_fixed_{target}.png"
     plt.savefig(out, dpi=150)
     plt.close()
 
 
-def _load_rolling_arx_meta(target: str):
+def _plot_rolling_arx(cfg: DictConfig, target: str, max_points: int = 24 * 60):
     """
-    Load Rolling ARX metadata if it exists.
+    Plot Rolling / Expanding ARX forecast vs actual.
+    Uses the saved CSV from rolling_arx.py.
     """
-    meta_path = RESULTS_DIR / f"rolling_arx_{target}_meta.json"
-    if not meta_path.exists():
-        return None
+    csv_path = Path(cfg.data.paths.results_dir) / f"rolling_arx_{target}.csv"
+    if not csv_path.exists():
+        print(f"[Plot] Rolling ARX CSV not found: {csv_path}")
+        return
 
-    with open(meta_path, "r", encoding="utf-8") as f:
-        meta = json.load(f)
+    df = pd.read_csv(csv_path, parse_dates=["timestamp"], index_col="timestamp")
 
-    return {
-        "model": "RollingARX",
-        "evaluation": meta.get("evaluation", "expanding_refit"),
-        "rmse": meta.get("rmse"),
-        "mae": meta.get("mae"),
-        "train_time_sec": meta.get("total_fit_time_sec"),
-    }
+    if len(df) == 0:
+        print("[Plot] Rolling ARX CSV is empty.")
+        return
+
+    if len(df) > max_points:
+        df = df.iloc[-max_points:]
+
+    plt.figure(figsize=(14, 6))
+    plt.plot(df.index, df["y_true"], label="Actual", linewidth=2)
+    plt.plot(df.index, df["y_pred"], label="Rolling ARX", alpha=0.85)
+
+    plt.title(f"Rolling ARX (expanding refit) – {target}")
+    plt.xlabel("Time")
+    plt.ylabel("Price")
+    plt.legend()
+    plt.tight_layout()
+
+    out = Path(cfg.data.paths.results_dir) / f"forecast_rolling_arx_{target}.png"
+    plt.savefig(out, dpi=150)
+    plt.close()
+
+    print(f"[Plot] Saved rolling ARX plot to: {out}")
 
 
-def _build_summary_table(results: dict, target: str) -> pd.DataFrame:
+# ======================================================
+# SUMMARY
+# ======================================================
+
+def _build_summary_table(results: dict) -> pd.DataFrame:
     rows = []
 
-    # Fixed-split models
     for model, res in results.items():
         rows.append(
             {
@@ -73,34 +96,33 @@ def _build_summary_table(results: dict, target: str) -> pd.DataFrame:
             }
         )
 
-    # Rolling ARX (if available)
-    rolling_arx = _load_rolling_arx_meta(target)
-    if rolling_arx is not None:
-        rows.append(rolling_arx)
-
     df = pd.DataFrame(rows).set_index("model")
     return df.sort_values(["evaluation", "rmse"])
 
 
-def main(target: str = "level"):
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+# ======================================================
+# MAIN
+# ======================================================
 
-    # --------------------------------------------------
-    # Fixed-split comparison (SARIMAX, GARCH-X, LSTM)
-    # --------------------------------------------------
-    results = run_comparison(target=target, force_retrain=False)
+@hydra.main(version_base=None, config_path="../configs", config_name="config")
+def main(cfg: DictConfig):
+    target = cfg.target
 
-    # --------------------------------------------------
-    # Plots
-    # --------------------------------------------------
-    _plot_fixed_split(results, target)
+    results_dir = Path(cfg.data.paths.results_dir)
+    results_dir.mkdir(parents=True, exist_ok=True)
 
-    # --------------------------------------------------
-    # Summary table
-    # --------------------------------------------------
-    summary = _build_summary_table(results, target)
+    results = run_comparison(
+        cfg=cfg,
+        target=target,
+        force_retrain=False,
+    )
 
-    out_csv = RESULTS_DIR / f"model_comparison_{target}.csv"
+    _plot_fixed_split(cfg, results, target)
+    _plot_rolling_arx(cfg, target)
+
+    summary = _build_summary_table(results)
+
+    out_csv = results_dir / f"model_comparison_{target}.csv"
     summary.to_csv(out_csv)
 
     print("\nModel comparison summary:\n")
@@ -109,4 +131,4 @@ def main(target: str = "level"):
 
 
 if __name__ == "__main__":
-    main(target="level")
+    main()

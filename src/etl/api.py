@@ -1,265 +1,195 @@
+import io
+import pandas as pd
+import requests
 from datetime import datetime
-from dotenv import load_dotenv
-import os
 from enappsys import EnAppSys
-from config import RES, TZ, CUR
+from omegaconf import DictConfig
+
 
 # ======================
 # CLIENT SETUP
 # ======================
 
-load_dotenv()
-
-client = EnAppSys(
-    user=os.getenv("user"),
-    secret=os.getenv("password"),
-)
+def get_client(cfg: DictConfig) -> EnAppSys:
+    """Initialize EnAppSys client using Hydra config."""
+    return EnAppSys(
+        user=cfg.api.api.user,
+        secret=cfg.api.api.password,
+    )
 
 
 # ======================
-# GENERIC CHART WRAPPER
+# GENERIC CHART WRAPPERS
 # ======================
 
 def chart_query(
+    cfg: DictConfig,
     *,
     code: str,
-    currency: str | None = None,
-    version: int | None = None,
     start: datetime | None = None,
     end: datetime | None = None,
-):
+) -> pd.DataFrame:
     """
-    Unified EnAppSys chart query using chart `code`.
-    
-    Parameters
-    ----------
-    code : str
-        Chart code (e.g., "gb/elec/epex/daprices/gb1")
-    currency : str, optional
-        Currency code (default: EUR)
-    version : int, optional
-        Data version (for forecasts)
-    start : str, optional
-        Start datetime (default: global START)
-    end : str, optional
-        End datetime (default: global END)
-    
-    Returns
-    -------
-    pd.DataFrame
-        Data with datetime index
+    Unified EnAppSys chart query using client API.
     """
-    # Handle version parameter by appending to code
-    full_code = code
-    if version is not None:
-        full_code = f"{code}&version={version}"
-    
-    return client.chart.get(
-        "csv",
-        code=full_code,
-        start_dt=start,
-        end_dt=end,
-        resolution=RES,
-        time_zone=TZ,
-        currency=currency or CUR,
-        min_avg_max=False,
-    ).to_df()
+    client = get_client(cfg)
 
-# ======================
-# LOW-LEVEL: Direct URL Construction
-# ======================
+    return (
+        client.chart.get(
+            "csv",
+            code=code,
+            start_dt=start,
+            end_dt=end,
+            resolution=cfg.api.settings.resolution,
+            time_zone=cfg.api.settings.timezone,
+            currency=cfg.api.settings.currency,
+            min_avg_max=False,
+        )
+        .to_df()
+    )
+
 
 def chart_query_with_version(
+    cfg: DictConfig,
     *,
     code: str,
-    version: int | None = None,
-    currency: str | None = None,
-    start: datetime | None = None,
-    end: datetime | None = None,
-):
+    version: int,
+    start: datetime,
+    end: datetime,
+) -> pd.DataFrame:
     """
-    Direct URL construction for Chart API with version support.
-    
-    This bypasses the client wrapper to handle version parameters correctly.
+    Direct URL construction for charts requiring explicit versioning.
     """
-    import requests
-    from datetime import datetime
-    
-
-
-    # Format dates as YYYYMMDDHHmm
-    start_str = start.strftime("%Y%m%d%H%M")
-    end_str = end.strftime("%Y%m%d%H%M")
-    
-    # Build parameters
     params = {
         "code": code,
-        "start": start_str,
-        "end": end_str,
-        "res": RES,
-        "timezone": TZ,
-        "currency": currency or CUR,
+        "start": start.strftime("%Y%m%d%H%M"),
+        "end": end.strftime("%Y%m%d%H%M"),
+        "res": cfg.api.settings.resolution,
+        "timezone": cfg.api.settings.timezone,
+        "currency": cfg.api.settings.currency,
         "minavmax": "false",
         "tag": "csv",
         "delimiter": "comma",
-        "user": os.getenv("user"),
-        "pass": os.getenv("password"),
+        "user": cfg.api.api.user,
+        "pass": cfg.api.api.password,
+        "version": version,
     }
-    
-    # Add version if provided
-    if version is not None:
-        params["version"] = version
-    
-    # Make request
-    url = "https://app.enappsys.com/datadownload"
-    response = requests.get(url, params=params)
-    
+
+    response = requests.get(
+        "https://app.enappsys.com/datadownload",
+        params=params,
+        timeout=60,
+    )
+
     if response.status_code != 200:
-        raise Exception(f"API Error {response.status_code}: {response.text[:500]}")
-    
-    # Parse CSV
-    import pandas as pd
-    import io
-    
+        raise RuntimeError(
+            f"EnAppSys API error {response.status_code}: {response.text[:300]}"
+        )
+
     df = pd.read_csv(
         io.StringIO(response.text),
-        header=[0, 1],
         index_col=0,
         parse_dates=True,
         date_format="[%d/%m/%Y %H:%M]",
     )
-    df.index.name = "dateTime"
-    df.index = df.index.tz_localize(TZ, ambiguous="infer")
-    
-    # Flatten column names (remove unit row)
-    df.columns = df.columns.get_level_values(0)
-    
+
+    df.index.name = "timestamp"
+    df.index = df.index.tz_localize(
+        cfg.api.settings.timezone, ambiguous="infer"
+    )
+
     return df
 
-# ======================
-# DAY-AHEAD BORDER PRICES
-# ======================
-def query_da_borders(start: str | None = None, end: str | None = None):
-    """
-    Day-ahead system / border prices (gb)
-    """
-    return chart_query(
-        code="gb/elec/pricing/daprices",
-        currency=CUR,
-        start=start,
-        end=end,
-    )
 
 # ======================
-# DAY-AHEAD AUCTIONS
+# DATA-SPECIFIC QUERIES
 # ======================
 
-def query_da_price(start: str | None = None, end: str | None = None):
-    """
-    Day-ahead auction prices (gb)
-    """
+def query_da_price(cfg: DictConfig, start=None, end=None) -> pd.DataFrame:
+    """Day-ahead auction prices (GB)."""
     return chart_query(
+        cfg,
         code="gb/elec/epex/daprices",
-        currency=CUR,
         start=start,
         end=end,
     )
 
-# ======================
-# INTRADAY
-# ======================
 
-def query_intraday_wap(start: str | None = None, end: str | None = None):
-    """
-    Intraday weighted average prices (delivery-hour indexed)
-    
-    Parameters
-    ----------
-    start : str, optional
-        Start datetime (format: "YYYY-MM-DDTHH:MM")
-    end : str, optional
-        End datetime (format: "YYYY-MM-DDTHH:MM")
-    """
+def query_da_borders(cfg: DictConfig, start=None, end=None) -> pd.DataFrame:
+    """Day-ahead border / system prices (GB + neighbors)."""
     return chart_query(
+        cfg,
+        code="gb/elec/pricing/daprices",
+        start=start,
+        end=end,
+    )
+
+
+def query_intraday_wap(cfg: DictConfig, start=None, end=None) -> pd.DataFrame:
+    """Intraday weighted average prices (half-hourly)."""
+    return chart_query(
+        cfg,
         code="gb/elec/epex/hh",
-        currency=CUR,
         start=start,
         end=end,
     )
 
 
-# ======================
-# RENEWABLE FORECASTS
-# ======================
-
-def query_wind_forecast(start: str | None = None, end: str | None = None):
-    """
-    Wind generation intraday forecast (v2)
-    Uses direct URL construction to handle version parameter
-    """
+def query_wind_forecast(cfg: DictConfig, start=None, end=None) -> pd.DataFrame:
+    """Wind generation forecast."""
     return chart_query(
+        cfg,
         code="gb/elec/renewables/wind",
-        currency=CUR,
         start=start,
         end=end,
     )
 
 
-def query_solar_forecast(start: str | None = None, end: str | None = None):
-    """
-    Solar generation intraday forecast (v2)
-    Uses direct URL construction to handle version parameter
-    """
+def query_solar_forecast(cfg: DictConfig, start=None, end=None) -> pd.DataFrame:
+    """Solar generation forecast."""
     return chart_query(
+        cfg,
         code="gb/elec/renewables/solar",
-        currency=CUR,
         start=start,
         end=end,
     )
 
-# ======================
-# DEMAND FORECASTS
-# ======================
-def query_demand_anticipated(start: str | None = None, end: str | None = None):
-    """
-    Anticipated electricity demand forecast
-    """
+
+def query_demand_anticipated(cfg: DictConfig, start=None, end=None) -> pd.DataFrame:
+    """Anticipated electricity demand."""
     return chart_query(
+        cfg,
         code="gb/elec/demand/anticipated",
         start=start,
         end=end,
     )
 
-def query_demand_forecast_error(start: str | None = None, end: str | None = None):
-    """
-    Demand forecast error time series
-    """
+
+def query_demand_forecast_error(cfg: DictConfig, start=None, end=None) -> pd.DataFrame:
+    """Demand forecast error (TSDF)."""
     return chart_query(
+        cfg,
         code="gb/elec/demand/tsdf/error",
         start=start,
         end=end,
     )
 
-def query_da_demand_forecast(start: str | None = None, end: str | None = None):
-    """
-    Day-ahead electricity demand forecast
-    """
+
+def query_da_demand_forecast(cfg: DictConfig, start=None, end=None) -> pd.DataFrame:
+    """Day-ahead electricity demand forecast."""
     return chart_query(
+        cfg,
         code="gb/elec/demand/anticipated/tsdf",
         start=start,
         end=end,
     )
 
-# ======================
-# GENERATION vs FORECAST
-# ======================
-def query_generation_vs_forecast(start: str | None = None, end: str | None = None):
-    """
-    Wind generation vs forecast
-    """
+
+def query_generation_vs_forecast(cfg: DictConfig, start=None, end=None) -> pd.DataFrame:
+    """Generation mix vs forecast."""
     return chart_query(
+        cfg,
         code="gb/elec/generation/forecast",
-        currency=CUR,
         start=start,
         end=end,
     )

@@ -2,13 +2,17 @@ import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
-from pathlib import Path
 from typing import Literal, Optional, Tuple
+from omegaconf import DictConfig
 
-from config import FINAL_DATA_DIR
-from modelling.model_config import LSTMConfig, CORE_MEAN_EXOG_COLS, ALL_MEAN_EXOG_COLS, VARIANCE_EXOG_COLS
+
+# ======================================================
+# PARAMETRIC DATASET BUILDER (MODEL-AGNOSTIC)
+# ======================================================
 
 def load_parametric_dataset(
+    *,
+    cfg: DictConfig,
     data: Optional[pd.DataFrame] = None,
     file_path: Optional[str] = None,
     target: Literal["level", "spread"] = "level",
@@ -16,34 +20,10 @@ def load_parametric_dataset(
     train_end_date: Optional[str] = None,
     test_start_date: Optional[str] = None,
     verbose: bool = True,
-) -> pd.DataFrame:
+) -> pd.DataFrame | Tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Prepare a single modelling dataframe for parametric electricity price models
-    (SARIMAX, SARIMAX+GARCH-X, Markov-switching ARX).
-
-    Parameters
-    ----------
-    data : pd.DataFrame, optional
-        Pre-loaded dataframe with all raw features.
-    file_path : str, optional
-        Path to a CSV/Parquet file containing the raw data.
-    target : {"level", "spread"}
-        "level"  -> intraday_wap as target
-        "spread" -> intraday_wap - da_price as target
-    drop_na : bool
-        Whether to drop rows with NA after lag construction.
-    train_end_date : str, optional
-        End date for training set (inclusive)
-    test_start_date : str, optional
-        Start date for test set (inclusive)
-    verbose : bool
-        Print loading information
-
-    Returns
-    -------
-    pd.DataFrame or tuple
-        Final dataframe ready for model estimation.
-        If train/test dates provided, returns (train_df, test_df)
+    Prepare a generic modelling dataframe for parametric electricity price models.
+    No model-specific assumptions are made here.
     """
 
     if data is None and file_path is None:
@@ -57,21 +37,17 @@ def load_parametric_dataset(
     else:
         df = data.copy()
 
-    # Ensure datetime index
     if not isinstance(df.index, pd.DatetimeIndex):
-        try:
-            df.index = pd.to_datetime(df.index)
-        except:
-            raise ValueError("Index must be convertible to DatetimeIndex")
+        df.index = pd.to_datetime(df.index)
 
     df = df.sort_index()
-    
+
     if verbose:
         print(f"Loaded {len(df)} rows from {df.index.min()} to {df.index.max()}")
 
-    # ------------------------------------------------------------------
+    # --------------------------------------------------
     # Target construction
-    # ------------------------------------------------------------------
+    # --------------------------------------------------
     df["id_da_spread"] = df["intraday_wap"] - df["da_price"]
 
     if target == "level":
@@ -79,129 +55,111 @@ def load_parametric_dataset(
     elif target == "spread":
         df["y"] = df["id_da_spread"]
     else:
-        raise ValueError("target must be either 'level' or 'spread'")
+        raise ValueError("target must be 'level' or 'spread'")
 
-    # ------------------------------------------------------------------
-    # Forecast / outturn errors
-    # ------------------------------------------------------------------
+    # --------------------------------------------------
+    # Forecast errors
+    # --------------------------------------------------
     df["demand_error"] = df["demand_actual"] - df["demand_da_forecast"]
     df["wind_error"] = df["wind_outturn"] - df["wind_forecast_ng"]
     df["solar_error"] = df["solar_outturn"] - df["solar_forecast_ng"]
 
-    # ------------------------------------------------------------------
-    # Endogenous lags (for AR terms / Markov switching)
-    # ------------------------------------------------------------------
+    # --------------------------------------------------
+    # Endogenous lags
+    # --------------------------------------------------
     df["y_lag1"] = df["y"].shift(1)
     df["y_lag24"] = df["y"].shift(24)
 
-    # ------------------------------------------------------------------
-    # Exogenous lags based on cross-correlation evidence
-    # ------------------------------------------------------------------
+    # --------------------------------------------------
+    # Exogenous lags
+    # --------------------------------------------------
     for var in ["demand_actual", "wind_outturn"]:
         df[f"{var}_lag1"] = df[var].shift(1)
         df[f"{var}_lag24"] = df[var].shift(24)
 
-    # Optional short memory for solar if needed later
     df["solar_outturn_lag1"] = df["solar_outturn"].shift(1)
 
-    # ------------------------------------------------------------------
-    # Calendar / seasonality
-    # ------------------------------------------------------------------
-    if "hour" not in df.columns:
-        df["hour"] = df.index.hour
-    
-    if "hour_sin" not in df.columns:
-        df["hour_sin"] = np.sin(2 * np.pi * df["hour"] / 24)
-        df["hour_cos"] = np.cos(2 * np.pi * df["hour"] / 24)
-    
-    if "dow_sin" not in df.columns:
-        dow = df.index.dayofweek
-        df["dow_sin"] = np.sin(2 * np.pi * dow / 7)
-        df["dow_cos"] = np.cos(2 * np.pi * dow / 7)
-    
-    if "is_weekend" not in df.columns:
-        df["is_weekend"] = (df.index.dayofweek >= 5).astype(int)
+    # --------------------------------------------------
+    # Calendar features
+    # --------------------------------------------------
+    df["hour"] = df.index.hour
+    df["hour_sin"] = np.sin(2 * np.pi * df["hour"] / 24)
+    df["hour_cos"] = np.cos(2 * np.pi * df["hour"] / 24)
 
-    # ------------------------------------------------------------------
-    # Variance-equation regressors (for GARCH-X)
-    # ------------------------------------------------------------------
+    dow = df.index.dayofweek
+    df["dow_sin"] = np.sin(2 * np.pi * dow / 7)
+    df["dow_cos"] = np.cos(2 * np.pi * dow / 7)
+    df["is_weekend"] = (dow >= 5).astype(int)
+
+    # --------------------------------------------------
+    # Variance regressors (for GARCH-X, optional)
+    # --------------------------------------------------
     df["abs_demand_error"] = df["demand_error"].abs()
     df["abs_wind_error"] = df["wind_error"].abs()
     df["abs_solar_error"] = df["solar_error"].abs()
     df["abs_id_da_spread"] = df["id_da_spread"].abs()
-
-    # Peak-hour volatility dummy: 15–18
     df["is_peak_15_18"] = df["hour"].between(15, 18).astype(int)
 
-    # ------------------------------------------------------------------
-    # Feature exclusion logic for spread model
-    # ------------------------------------------------------------------
+    # --------------------------------------------------
+    # Spread-specific cleanup
+    # --------------------------------------------------
     if target == "spread":
         df = df.drop(columns=["da_price"], errors="ignore")
 
-    # ------------------------------------------------------------------
+    # --------------------------------------------------
     # Final cleaning
-    # ------------------------------------------------------------------
+    # --------------------------------------------------
     if drop_na:
-        initial_len = len(df)
+        before = len(df)
         df = df.dropna()
         if verbose:
-            print(f"Dropped {initial_len - len(df)} rows with NA values")
+            print(f"Dropped {before - len(df)} rows with NA")
 
-    # ------------------------------------------------------------------
-    # Train/test split
-    # ------------------------------------------------------------------
+    # --------------------------------------------------
+    # Train / test split
+    # --------------------------------------------------
     if train_end_date and test_start_date:
         train_df = df[df.index <= train_end_date].copy()
         test_df = df[df.index >= test_start_date].copy()
-        
-        if verbose:
-            print(f"Train set: {len(train_df)} rows ({train_df.index.min()} to {train_df.index.max()})")
-            print(f"Test set: {len(test_df)} rows ({test_df.index.min()} to {test_df.index.max()})")
-        
         return train_df, test_df
 
     return df
 
+
 # ======================================================
-# PUBLIC: parametric comparison loader
+# GENERIC PARAMETRIC LOADER (NO MODEL ASSUMPTIONS)
 # ======================================================
 
 def load_parametric_data(
+    *,
+    cfg: DictConfig,
     target: Literal["level", "spread"] = "level",
     verbose: bool = True,
-    exogenous_type: Literal["core", "all", "variance"] = "core",
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, pd.DatetimeIndex]:
+):
     """
-    Load data for parametric models in array form.
+    Load generic parametric data.
+    Model-specific feature selection happens downstream.
     """
 
-    file_path = FINAL_DATA_DIR / "core_2020-01-01_2025-12-31.parquet"
-
-    if exogenous_type == "core":
-        exog_cols = CORE_MEAN_EXOG_COLS
-    elif exogenous_type == "all":
-        exog_cols = ALL_MEAN_EXOG_COLS
-    elif exogenous_type == "variance":
-        exog_cols = VARIANCE_EXOG_COLS
-
-    # Global split – defined once here
-    train_end_date = "2024-12-31 23:00"
-    test_start_date = "2025-01-01 00:00"
+    file_path = (
+        f"{cfg.data.paths.final_data_dir}/"
+        f"{cfg.dataset}.parquet"
+    )
 
     train_df, test_df = load_parametric_dataset(
-        file_path=str(file_path),
+        cfg=cfg,
+        file_path=file_path,
         target=target,
-        train_end_date=train_end_date,
-        test_start_date=test_start_date,
+        train_end_date="2024-12-31 23:00",
+        test_start_date="2025-01-01 00:00",
         verbose=verbose,
     )
 
     y_train = train_df["y"].values
     y_test = test_df["y"].values
 
-    X_train = train_df[exog_cols].values
-    X_test = test_df[exog_cols].values
+    X_train = train_df.drop(columns=["y"])
+    X_test = test_df.drop(columns=["y"])
 
     test_timestamps = test_df.index
 
@@ -209,7 +167,7 @@ def load_parametric_data(
 
 
 # ======================================================
-# PUBLIC: LSTM dataset + loader
+# LSTM DATASET
 # ======================================================
 
 class SequenceDataset(Dataset):
@@ -230,49 +188,53 @@ class SequenceDataset(Dataset):
 
 
 def load_lstm_data(
-    config: LSTMConfig,
+    *,
+    cfg: DictConfig,
     target: Literal["level", "spread"] = "level",
     verbose: bool = True,
-) -> Tuple[DataLoader, DataLoader, pd.DatetimeIndex]:
+) -> Tuple[DataLoader, DataLoader, pd.DatetimeIndex, int]:
     """
-    Load univariate LSTM data (target only).
+    Load univariate LSTM data.
     """
 
-    file_path = FINAL_DATA_DIR / "core_2020-01-01_2025-12-31.parquet"
-
-    # Same global split as parametric models
-    train_end_date = "2024-12-31 23:00"
-    test_start_date = "2025-01-01 00:00"
+    file_path = (
+        f"{cfg.data.paths.final_data_dir}/"
+        f"{cfg.dataset}.parquet"
+    )
 
     train_df, test_df = load_parametric_dataset(
-        file_path=str(file_path),
+        cfg=cfg,
+        file_path=file_path,
         target=target,
-        train_end_date=train_end_date,
-        test_start_date=test_start_date,
+        train_end_date="2024-12-31 23:00",
+        test_start_date="2025-01-01 00:00",
         verbose=verbose,
     )
 
     y_train = train_df["y"].values
     y_test = test_df["y"].values
 
-    train_ds = SequenceDataset(y_train, config.sequence_length)
-    test_ds = SequenceDataset(y_test, config.sequence_length)
+    seq_len = cfg.model.lstm.data.sequence_length
+    batch_size = cfg.model.lstm.data.batch_size
+
+    train_ds = SequenceDataset(y_train, seq_len)
+    test_ds = SequenceDataset(y_test, seq_len)
 
     train_loader = DataLoader(
         train_ds,
-        batch_size=config.batch_size,
+        batch_size=batch_size,
         shuffle=True,
         drop_last=True,
     )
 
     test_loader = DataLoader(
         test_ds,
-        batch_size=config.batch_size,
+        batch_size=batch_size,
         shuffle=False,
         drop_last=False,
     )
 
-    # Align timestamps with predictions
-    test_timestamps = test_df.index[config.sequence_length :]
+    test_timestamps = test_df.index[seq_len:]
+    param_length = len(train_df)
 
-    return train_loader, test_loader, test_timestamps
+    return train_loader, test_loader, test_timestamps, param_length

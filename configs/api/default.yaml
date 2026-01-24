@@ -1,0 +1,9 @@
+# API and Market settings
+api:
+  user: ${oc.env:user}
+  password: ${oc.env:password}
+
+settings:
+  resolution: "hourly"
+  timezone: "UTC"
+  currency: "EUR"

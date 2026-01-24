@@ -1,0 +1,14 @@
+name: "lstm"
+data:
+  sequence_length: 24
+  batch_size: 64
+architecture:
+  input_size: 1
+  hidden_size: 32
+  num_layers: 1
+  dropout: 0.0
+training:
+  learning_rate: 0.001
+  num_epochs: 10
+runtime:
+  device: "cpu"

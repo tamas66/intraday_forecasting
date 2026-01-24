@@ -1,0 +1,7 @@
+name: "garch"
+p: 1
+q: 1
+dist: "t"
+use_exogenous: true
+mean_exog: ${data.features.core_mean_exog}
+var_exog: ${data.features.variance_exog}

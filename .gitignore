@@ -207,7 +207,7 @@ marimo/_lsp/
 __marimo__/
 
 # Custom ignores
-data/
+/data/
 thesis_documents/
 outputs/
 notebooks/

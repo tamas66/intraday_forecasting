@@ -1,0 +1,5 @@
+name: "sarimax"
+order: [1, 0, 1]
+seasonal_order: [1, 0, 1, 24]
+trend: "c"
+exog_cols: ${data.features.core_mean_exog} # Link to the registry

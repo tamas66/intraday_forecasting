@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from modelling.model_config import LSTMConfig
+from omegaconf import DictConfig
 
 
 class LSTMModel(nn.Module):
@@ -8,18 +8,20 @@ class LSTMModel(nn.Module):
     Simple univariate LSTM for hourly electricity price forecasting.
     """
 
-    def __init__(self, config: LSTMConfig):
+    def __init__(self, cfg: DictConfig):
         super().__init__()
 
+        lstm_cfg = cfg.model.lstm.architecture
+
         self.lstm = nn.LSTM(
-            input_size=config.input_size,
-            hidden_size=config.hidden_size,
-            num_layers=config.num_layers,
-            dropout=config.dropout if config.num_layers > 1 else 0.0,
+            input_size=lstm_cfg.input_size,
+            hidden_size=lstm_cfg.hidden_size,
+            num_layers=lstm_cfg.num_layers,
+            dropout=lstm_cfg.dropout if lstm_cfg.num_layers > 1 else 0.0,
             batch_first=True,
         )
 
-        self.fc = nn.Linear(config.hidden_size, 1)
+        self.fc = nn.Linear(lstm_cfg.hidden_size, 1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """

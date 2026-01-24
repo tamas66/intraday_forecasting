@@ -1,0 +1,7 @@
+defaults:
+  - api: default
+  - data: default
+  - _self_
+
+target: level        # or spread
+dataset: core_2020-01-01_2025-12-31

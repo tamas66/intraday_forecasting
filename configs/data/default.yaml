@@ -1,0 +1,133 @@
+# Settings from project_config.py and model_config.py
+paths:
+  raw_data_dir: "data/raw"
+  processed_data_dir: "data/processed"
+  final_data_dir: "data/final"
+  results_dir: "outputs/results"
+  models_dir: "models"
+  eda_dir: "outputs/eda"
+
+target_map:
+  level: intraday_wap
+  spread: id_da_spread
+
+dataframe:
+  index_name: "timestamp"
+  target_col: ${data.target_map.${target}}
+
+
+# Column Registries from model_config.py
+features:
+  model:
+    core_mean_exog:
+      - "da_price"
+      - "demand_actual"
+      - "demand_error"
+    
+    all_mean_exog:
+      - "da_price"
+      - "demand_actual"
+      - "demand_error"
+      - "demand_actual_lag1"
+      - "demand_actual_lag24"
+      - "wind_outturn"
+      - "wind_error"
+      - "wind_outturn_lag1"
+      - "wind_outturn_lag24"
+      - "solar_outturn"
+      - "solar_error"
+      - "solar_outturn_lag1"
+      - "hour_sin"
+      - "hour_cos"
+      - "dow_sin"
+      - "dow_cos"
+      - "is_weekend"
+
+    variance_exog:
+      - "abs_demand_error"
+      - "abs_wind_error"
+      - "abs_solar_error"
+      - "abs_id_da_spread"
+      - "is_peak_15_18"
+
+  preprocessing:
+    core_features:
+    # Prices & spreads
+    - intraday_wap
+    - da_price
+
+    # Wind fundamentals
+    - wind_outturn
+    - wind_forecast_ng
+
+    # Solar fundamentals
+    - solar_outturn
+    - solar_forecast_ng
+
+    # Demand
+    - demand_actual
+    - demand_da_forecast
+
+    # Seasonality / calendar
+    - hour_sin
+    - hour_cos
+    - dow_sin
+    - dow_cos
+    - is_weekend
+
+  baseline_features:
+    # Prices & spreads
+    - intraday_wap
+    - da_price
+    - ssp
+    - sbp
+
+    # Demand (level + key forecast)
+    - demand_actual
+    - demand_da_forecast
+
+    # Wind fundamentals
+    - wind_outturn
+    - wind_forecast_ng
+    - wind_capacity
+    - wind_penetration
+    - wind_outturn_delta_1
+    - wind_outturn_delta_4
+
+    # Solar fundamentals
+    - solar_outturn
+    - solar_forecast_ng
+    - solar_capacity
+    - solar_outturn_delta_1
+    - solar_outturn_delta_4
+
+    # Conventional generation stack (coarse)
+    - gen_ccgt
+    - gen_nuclear
+    - gen_biomass
+    - gen_hydro
+    - gen_total_conventional
+
+    # Interconnection & foreign prices
+    - interconnector_total
+    - price_france
+    - price_netherlands
+    - price_norway
+    - price_isem
+
+    # Seasonality / calendar
+    - hour_sin
+    - hour_cos
+    - dow_sin
+    - dow_cos
+    - is_weekend
+
+    # Rolling statistics for price dynamics
+    - intraday_wap_rollmean_4
+    - intraday_wap_rollstd_4
+    - intraday_wap_rollmean_12
+    - intraday_wap_rollstd_12
+    - da_price_rollmean_4
+    - da_price_rollstd_4
+    - da_price_rollmean_12
+    - da_price_rollstd_12
