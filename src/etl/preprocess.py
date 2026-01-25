@@ -9,7 +9,7 @@ import pandas as pd
 from omegaconf import DictConfig
 
 import etl.api as api
-import etl.transform as prep
+import etl.transform as transform
 """
 Data pipeline for Great Britain power market data.
 
@@ -109,7 +109,7 @@ def fetch_and_save_raw_data(
         solar,
         flows,
         generation,
-    ) = prep.build_dataframes_from_api_responses(
+    ) = transform.build_dataframes_from_api_responses(
         df_da_price=df_da_price,
         df_da_borders=df_da_borders,
         df_intraday=df_intraday,
@@ -188,7 +188,7 @@ def process_and_save_features(
     if price_cols is None:
         price_cols = ["da_price", "intraday_wap", "ssp", "sbp"]
 
-    df = prep.build_feature_dataframe(
+    df = transform.build_feature_dataframe(
         da_prices=raw["da_prices"],
         intraday_prices=raw["intraday_prices"],
         demand=raw["demand"],
@@ -259,9 +259,9 @@ def load_and_save_working_subset(
     df = load_date_range(cfg, start_date, end_date, stage="processed")
 
     if features == "core":
-        cols = cfg.data.features.preprocessing.core_features
+        cols = cfg.data.features.transformrocessing.core_features
     elif features == "baseline":
-        cols = cfg.data.features.preprocessing.baseline_features
+        cols = cfg.data.features.transformrocessing.baseline_features
     else:
         cols = df.columns.tolist()
 

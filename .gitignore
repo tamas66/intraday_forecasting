@@ -216,3 +216,4 @@ prompt.txt
 *.png
 *.pdf
 .env
+*.txt

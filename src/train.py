@@ -8,7 +8,7 @@ from torch.optim import Adam
 import hydra
 from omegaconf import DictConfig
 
-from modelling.ann_model import LSTMModel
+from src.modelling.lstm import LSTMModel
 from data import load_lstm_data
 
 

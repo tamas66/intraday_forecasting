@@ -163,12 +163,12 @@ def build_dataframes_from_api_responses(
     # ----------------------
     da_prices = pd.DataFrame(index=df_da_price.index)
     da_prices["da_price"] = df_da_price["DA Weighted Price (EPEX Nordpool)"]
-    da_prices["da_price_epex"] = df_da_price["DA HR Price (EPEX)"]
-    da_prices["da_price_nordpool"] = df_da_price["DA HR Price (Nordpool)"]
-    da_prices["da_price_hh"] = df_da_price["DA HH Price"]
-    da_prices["da_volume_epex"] = df_da_price["DA HR Volume (EPEX)"]
-    da_prices["da_volume_nordpool"] = df_da_price["DA HR Volume (Nordpool)"]
-    da_prices["da_volume_hh"] = df_da_price["DA HH Volume"]
+    # da_prices["da_price_epex"] = df_da_price["DA HR Price (EPEX)"]
+    # da_prices["da_price_nordpool"] = df_da_price["DA HR Price (Nordpool)"]
+    # da_prices["da_price_hh"] = df_da_price["DA HH Price"]
+    # da_prices["da_volume_epex"] = df_da_price["DA HR Volume (EPEX)"]
+    # da_prices["da_volume_nordpool"] = df_da_price["DA HR Volume (Nordpool)"]
+    # da_prices["da_volume_hh"] = df_da_price["DA HH Volume"]
     da_prices = da_prices.sort_index().astype(float)
 
     # ----------------------
@@ -176,12 +176,12 @@ def build_dataframes_from_api_responses(
     # ----------------------
     intraday_prices = pd.DataFrame(index=df_intraday.index)
     intraday_prices["intraday_wap"] = df_intraday["HH WAP"]
-    intraday_prices["intraday_open"] = df_intraday["OPENING TRADED PRICE"]
-    intraday_prices["intraday_close"] = df_intraday["CLOSING TRADED PRICE"]
-    intraday_prices["intraday_high"] = df_intraday["HIGH TRADED PRICE"]
-    intraday_prices["intraday_low"] = df_intraday["LOW TRADED PRICE"]
-    intraday_prices["ssp"] = df_intraday["SSP"]
-    intraday_prices["sbp"] = df_intraday["SBP"]
+    # intraday_prices["intraday_open"] = df_intraday["OPENING TRADED PRICE"]
+    # intraday_prices["intraday_close"] = df_intraday["CLOSING TRADED PRICE"]
+    # intraday_prices["intraday_high"] = df_intraday["HIGH TRADED PRICE"]
+    # intraday_prices["intraday_low"] = df_intraday["LOW TRADED PRICE"]
+    # intraday_prices["ssp"] = df_intraday["SSP"]
+    # intraday_prices["sbp"] = df_intraday["SBP"]
     intraday_prices = intraday_prices.sort_index().astype(float)
 
     # ----------------------
@@ -189,16 +189,16 @@ def build_dataframes_from_api_responses(
     # ----------------------
     demand = pd.DataFrame(index=df_demand_anticipated.index)
     demand["demand_actual"] = df_demand_anticipated["DEMAND (NATIONAL GRID)"]
-    demand["demand_indo"] = df_demand_anticipated["DEMAND (INDO)"]
-    demand["demand_itsdo"] = df_demand_anticipated["DEMAND (ITSDO)"]
+    # demand["demand_indo"] = df_demand_anticipated["DEMAND (INDO)"]
+    # demand["demand_itsdo"] = df_demand_anticipated["DEMAND (ITSDO)"]
     demand["demand_forecast_tsdf"] = df_demand_anticipated["DEMAND FORECAST (TSDF)"]
-    demand["demand_forecast_enhanced"] = df_demand_anticipated["ENHANCED DEMAND FORECAST (TSDF)"]
-    demand["demand_forecast_ndf"] = df_demand_anticipated["DEMAND FORECAST (NDF)"]
-    demand["demand_forecast_enappsys"] = df_demand_anticipated["DEMAND ITSDO FORECAST (ENAPPSYS)"]
+    # demand["demand_forecast_enhanced"] = df_demand_anticipated["ENHANCED DEMAND FORECAST (TSDF)"]
+    # demand["demand_forecast_ndf"] = df_demand_anticipated["DEMAND FORECAST (NDF)"]
+    # demand["demand_forecast_enappsys"] = df_demand_anticipated["DEMAND ITSDO FORECAST (ENAPPSYS)"]
     demand["demand_da_forecast"] = df_da_demand_forecast["DEMAND FORECAST (TSDF)"]
-    demand["demand_da_forecast_enappsys"] = df_da_demand_forecast["DEMAND FORECAST (ENAPPSYS)"]
-    demand["demand_error_tsdf"] = df_demand_forecast_error["Demand Error (TSDF)"]
-    demand["demand_error_enhanced"] = df_demand_forecast_error["Demand Error Forecast (Enhanced)"]
+    # demand["demand_da_forecast_enappsys"] = df_da_demand_forecast["DEMAND FORECAST (ENAPPSYS)"]
+    demand["demand_error"] = df_demand_forecast_error["Demand Error (TSDF)"]
+    # demand["demand_error_enhanced"] = df_demand_forecast_error["Demand Error Forecast (Enhanced)"]
     demand = demand.sort_index().astype(float)
 
     # ----------------------
@@ -207,12 +207,12 @@ def build_dataframes_from_api_responses(
     wind = pd.DataFrame(index=df_wind.index)
     wind["wind_outturn"] = df_wind["Wind Outturn"]
     wind["wind_forecast_ng"] = df_wind["National Grid Forecast"]
-    wind["wind_forecast_enappsys_adj"] = df_wind["EnAppSys Forecast Trend-Adjusted"]
-    wind["wind_forecast_enappsys_raw"] = df_wind["EnAppSys Forecast Unadjusted"]
-    wind["wind_capacity"] = df_wind["Capacity"]
-    wind["wind_balancing"] = df_wind["Total Accepted Balancing Level"]
-    wind["wind_error_ng"] = wind["wind_outturn"] - wind["wind_forecast_ng"]
-    wind["wind_error_enappsys"] = wind["wind_outturn"] - wind["wind_forecast_enappsys_adj"]
+    # wind["wind_forecast_enappsys_adj"] = df_wind["EnAppSys Forecast Trend-Adjusted"]
+    # wind["wind_forecast_enappsys_raw"] = df_wind["EnAppSys Forecast Unadjusted"]
+    # wind["wind_capacity"] = df_wind["Capacity"]
+    # wind["wind_balancing"] = df_wind["Total Accepted Balancing Level"]
+    wind["wind_error"] = wind["wind_outturn"] - wind["wind_forecast_ng"]
+    # wind["wind_error_enappsys"] = wind["wind_outturn"] - wind["wind_forecast_enappsys_adj"]
     wind = wind.sort_index().astype(float)
 
     # ----------------------
@@ -221,13 +221,13 @@ def build_dataframes_from_api_responses(
     solar = pd.DataFrame(index=df_solar.index)
     solar["solar_outturn"] = df_solar["Sheffield Solar Outturn"]
     solar["solar_forecast_ng"] = df_solar["National Grid Forecast"]
-    solar["solar_forecast_enappsys"] = df_solar["Solar Forecast (EnAppSys)"]
-    solar["solar_forecast_enappsys_adj"] = df_solar["Trend Adjusted Solar Forecast (EnAppSys)"]
-    solar["solar_p10"] = df_solar["Solar P10 Forecast (EnAppSys)"]
-    solar["solar_p90"] = df_solar["Solar P90 Forecast (EnAppSys)"]
-    solar["solar_capacity"] = df_solar["Capacity"]
-    solar["solar_error_ng"] = solar["solar_outturn"] - solar["solar_forecast_ng"]
-    solar["solar_error_enappsys"] = solar["solar_outturn"] - solar["solar_forecast_enappsys_adj"]
+    # solar["solar_forecast_enappsys"] = df_solar["Solar Forecast (EnAppSys)"]
+    # solar["solar_forecast_enappsys_adj"] = df_solar["Trend Adjusted Solar Forecast (EnAppSys)"]
+    # solar["solar_p10"] = df_solar["Solar P10 Forecast (EnAppSys)"]
+    # solar["solar_p90"] = df_solar["Solar P90 Forecast (EnAppSys)"]
+    # solar["solar_capacity"] = df_solar["Capacity"]
+    solar["solar_error"] = solar["solar_outturn"] - solar["solar_forecast_ng"]
+    # solar["solar_error_enappsys"] = solar["solar_outturn"] - solar["solar_forecast_enappsys_adj"]
     solar = solar.sort_index().astype(float)
 
     # ----------------------
@@ -306,58 +306,31 @@ def build_feature_dataframe(
     df = add_renewable_ramps(df, "solar_outturn", [1, 4])
     df = add_rolling_features(df, ["intraday_wap", "da_price"], [4, 12, 24])
 
+    # --------------------------------------------------
+    # Endogenous lags
+    # --------------------------------------------------
+    df["y_lag1"] = df["y"].shift(1)
+    df["y_lag24"] = df["y"].shift(24)
+
+    # --------------------------------------------------
+    # Exogenous lags
+    # --------------------------------------------------
+    for var in ["demand_actual", "wind_outturn"]:
+        df[f"{var}_lag1"] = df[var].shift(1)
+        df[f"{var}_lag24"] = df[var].shift(24)
+
+    df["solar_outturn_lag1"] = df["solar_outturn"].shift(1)
+
+    # --------------------------------------------------
+    # Variance regressors
+    # --------------------------------------------------
+    df["abs_demand_error"] = df["demand_error"].abs()
+    df["abs_wind_error"] = df["wind_error"].abs()
+    df["abs_solar_error"] = df["solar_error"].abs()
+    df["abs_id_da_spread"] = df["id_da_spread"].abs()
+    df["is_peak_15_18"] = df["hour"].between(15, 18).astype(int)
+
     return df
-
-
-# ======================
-# SEQUENCING UTILITIES
-# ======================
-
-def create_sequences(
-    data: np.ndarray,
-    sequence_length: int,
-    forecast_horizon: int = 1,
-) -> Tuple[np.ndarray, np.ndarray]:
-    if data.ndim == 1:
-        data = data.reshape(-1, 1)
-
-    X, y = [], []
-    for i in range(len(data) - sequence_length - forecast_horizon + 1):
-        X.append(data[i:i + sequence_length])
-        y.append(data[i + sequence_length + forecast_horizon - 1])
-
-    return np.asarray(X), np.asarray(y)
-
-
-def align_sequences_with_index(
-    df: pd.DataFrame,
-    feature_cols: List[str],
-    target_col: str,
-    sequence_length: int,
-) -> Tuple[np.ndarray, np.ndarray, pd.DatetimeIndex]:
-    X_data = df[feature_cols].values
-    y_data = df[target_col].values
-
-    X_seq, y_seq = create_sequences(X_data, sequence_length)
-    timestamps = df.index[sequence_length:]
-
-    return X_seq, y_seq, timestamps
-
-
-def create_sample_weights(
-    timestamps: pd.DatetimeIndex,
-    peak_hours: Tuple[int, int] = (15, 18),
-    peak_weight: float = 2.0,
-    weekend_weight: float = 1.0,
-) -> np.ndarray:
-    weights = np.ones(len(timestamps))
-
-    hours = timestamps.hour
-    weights[(hours >= peak_hours[0]) & (hours <= peak_hours[1])] *= peak_weight
-    weights[timestamps.dayofweek >= 5] *= weekend_weight
-
-    return weights
-
 
 # ======================
 # MAIN

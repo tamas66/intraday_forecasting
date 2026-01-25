@@ -10,10 +10,9 @@ from omegaconf import DictConfig
 # PARAMETRIC DATASET BUILDER (MODEL-AGNOSTIC)
 # ======================================================
 
-def load_parametric_dataset(
+def load_dataset(
     *,
     cfg: DictConfig,
-    data: Optional[pd.DataFrame] = None,
     file_path: Optional[str] = None,
     target: Literal["level", "spread"] = "level",
     drop_na: bool = True,
@@ -25,17 +24,10 @@ def load_parametric_dataset(
     Prepare a generic modelling dataframe for parametric electricity price models.
     No model-specific assumptions are made here.
     """
-
-    if data is None and file_path is None:
-        raise ValueError("Either `data` or `file_path` must be provided.")
-
-    if data is None:
-        if file_path.endswith(".parquet"):
-            df = pd.read_parquet(file_path)
-        else:
-            df = pd.read_csv(file_path, parse_dates=True, index_col=0)
+    if file_path.endswith(".parquet"):
+        df = pd.read_parquet(file_path)
     else:
-        df = data.copy()
+        df = pd.read_csv(file_path, parse_dates=True, index_col=0)
 
     if not isinstance(df.index, pd.DatetimeIndex):
         df.index = pd.to_datetime(df.index)
@@ -56,49 +48,6 @@ def load_parametric_dataset(
         df["y"] = df["id_da_spread"]
     else:
         raise ValueError("target must be 'level' or 'spread'")
-
-    # --------------------------------------------------
-    # Forecast errors
-    # --------------------------------------------------
-    df["demand_error"] = df["demand_actual"] - df["demand_da_forecast"]
-    df["wind_error"] = df["wind_outturn"] - df["wind_forecast_ng"]
-    df["solar_error"] = df["solar_outturn"] - df["solar_forecast_ng"]
-
-    # --------------------------------------------------
-    # Endogenous lags
-    # --------------------------------------------------
-    df["y_lag1"] = df["y"].shift(1)
-    df["y_lag24"] = df["y"].shift(24)
-
-    # --------------------------------------------------
-    # Exogenous lags
-    # --------------------------------------------------
-    for var in ["demand_actual", "wind_outturn"]:
-        df[f"{var}_lag1"] = df[var].shift(1)
-        df[f"{var}_lag24"] = df[var].shift(24)
-
-    df["solar_outturn_lag1"] = df["solar_outturn"].shift(1)
-
-    # --------------------------------------------------
-    # Calendar features
-    # --------------------------------------------------
-    df["hour"] = df.index.hour
-    df["hour_sin"] = np.sin(2 * np.pi * df["hour"] / 24)
-    df["hour_cos"] = np.cos(2 * np.pi * df["hour"] / 24)
-
-    dow = df.index.dayofweek
-    df["dow_sin"] = np.sin(2 * np.pi * dow / 7)
-    df["dow_cos"] = np.cos(2 * np.pi * dow / 7)
-    df["is_weekend"] = (dow >= 5).astype(int)
-
-    # --------------------------------------------------
-    # Variance regressors (for GARCH-X, optional)
-    # --------------------------------------------------
-    df["abs_demand_error"] = df["demand_error"].abs()
-    df["abs_wind_error"] = df["wind_error"].abs()
-    df["abs_solar_error"] = df["solar_error"].abs()
-    df["abs_id_da_spread"] = df["id_da_spread"].abs()
-    df["is_peak_15_18"] = df["hour"].between(15, 18).astype(int)
 
     # --------------------------------------------------
     # Spread-specific cleanup
@@ -146,7 +95,7 @@ def load_parametric_data(
         f"{cfg.dataset}.parquet"
     )
 
-    train_df, test_df = load_parametric_dataset(
+    train_df, test_df = load_dataset(
         cfg=cfg,
         file_path=file_path,
         target=target,
@@ -202,7 +151,7 @@ def load_lstm_data(
         f"{cfg.dataset}.parquet"
     )
 
-    train_df, test_df = load_parametric_dataset(
+    train_df, test_df = load_dataset(
         cfg=cfg,
         file_path=file_path,
         target=target,
