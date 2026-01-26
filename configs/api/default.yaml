@@ -1,7 +1,7 @@
 # API and Market settings
 api:
-  user: ${API_USER: ""}
-  password: ${API_PASSWORD: ""}
+  user: ""
+  password: ""
 
 settings:
   resolution: "hourly"

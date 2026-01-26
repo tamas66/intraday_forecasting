@@ -5,8 +5,8 @@ rolling:
   refit_frequency: "monthly"
 
 regimes:
-  n_states: 2
-  switching: "markov"
+  n_states: 1
+  # switching: "markov"
 
 mean:
   ar_order: 1

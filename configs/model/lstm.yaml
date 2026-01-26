@@ -2,7 +2,7 @@ name: "lstm"
 
 data:
   lookback_length: 24        # L, Hydra-controlled
-  forecast_horizon: 24  # H, injected globally
+  forecast_horizon: ${horizon}  # H, injected globally
   batch_size: 64
 
   # Feature groups (resolved in data loader)

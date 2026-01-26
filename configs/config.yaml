@@ -2,12 +2,24 @@ defaults:
   - api: default
   - data: default
   - model: lstm
+  - override hydra/job_logging: disabled
+  - override hydra/hydra_logging: disabled
   - _self_
 
-# Manually include both models under their own keys
-models:
-  lstm: ${oc.dict.values:model/lstm} # This requires specific Hydra plugins
-  garch: ${oc.dict.values:model/garch}
+paths:
+  models_dir: models
+  outputs_dir: outputs
+
+hydra:
+  run:
+    dir: .
+  sweep:
+    dir: .
+  output_subdir: null
+  job:
+    chdir: false
+
+
 
 target: level        # or spread
 dataset: core_20200101_20251231

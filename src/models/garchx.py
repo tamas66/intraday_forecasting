@@ -1,4 +1,4 @@
-# src/models/garch.py
+# src/models/garchx.py
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -24,7 +24,7 @@ except Exception as e:
 class GarchEVTConfig:
     # Mean (Markov switching)
     n_states: int = 2
-
+    mean_ar_order: int = 1
     # GARCH
     p: int = 1
     q: int = 1
@@ -160,82 +160,32 @@ def _as_2d(x: Optional[np.ndarray]) -> Optional[np.ndarray]:
     return x
 
 
-def _extract_regime_params(ms_res) -> Dict[int, Dict[str, np.ndarray]]:
+def _build_arx_design(y: np.ndarray, X_mean: np.ndarray | None, p: int):
     """
-    Extract per-regime intercept + exog coefficients from statsmodels MarkovRegression.
-
-    We fit with switching intercept, non-switching exog by default for stability.
-    If exog also switches, this still works because params will include regime-specific
-    exog blocks; we attempt to parse by name.
-
-    Returns:
-      {regime: {"const": float, "beta": (k_exog,)}}  (beta may be shared)
+    Build ARX(p) design matrix with constant.
+    Returns (Y_trimmed, X_design)
     """
-    names = ms_res.model.param_names
-    params = np.asarray(ms_res.params)
+    T = len(y)
 
-    # Intercepts usually appear as "const[0]", "const[1]" or similar
-    # Exog usually as "x1", "x2", ... (possibly with regime suffix if switching)
-    out: Dict[int, Dict[str, Any]] = {}
-    n_states = ms_res.model.k_regimes
-    k_exog = ms_res.model.k_exog
+    rows = []
+    targets = []
 
-    # defaults
-    for s in range(n_states):
-        out[s] = {"const": 0.0, "beta": np.zeros(k_exog, dtype=float)}
+    for t in range(p, T):
+        row = [1.0]  # constant
 
-    # Map exog names in model order
-    # statsmodels uses 'x1'...'xk' for exog columns if you pass ndarray
-    # If you pass DataFrame, it uses column names.
-    exog_names = []
-    if ms_res.model.exog is not None:
-        # If exog was DataFrame, statsmodels keeps names; otherwise it makes "x1"... format
-        if hasattr(ms_res.model.exog, "columns"):
-            exog_names = list(ms_res.model.exog.columns)  # type: ignore
-        else:
-            exog_names = [f"x{i+1}" for i in range(k_exog)]
+        # AR terms
+        for i in range(1, p + 1):
+            row.append(y[t - i])
 
-    # Fill by parsing
-    for name, val in zip(names, params):
-        # intercept per regime
-        if name.startswith("const"):
-            # try const[0] pattern
-            if "[" in name and "]" in name:
-                s = int(name.split("[")[1].split("]")[0])
-                out[s]["const"] = float(val)
-            else:
-                # single intercept shared
-                for s in range(n_states):
-                    out[s]["const"] = float(val)
-        else:
-            # exog coefficient (shared or switching)
-            # possible patterns:
-            #   "beta.x1" / "x1" / "x1[0]" etc depending on statsmodels version
-            base = name
-            s_reg = None
-            if "[" in name and "]" in name:
-                try:
-                    s_reg = int(name.split("[")[1].split("]")[0])
-                    base = name.split("[")[0]
-                except Exception:
-                    s_reg = None
+        # Exogenous
+        if X_mean is not None:
+            row.extend(X_mean[t])
 
-            # try match to exog names
-            # strip common prefixes
-            for pref in ("beta.", "exog.", "b."):
-                if base.startswith(pref):
-                    base = base[len(pref):]
+        rows.append(row)
+        targets.append(y[t])
 
-            if base in exog_names:
-                j = exog_names.index(base)
-                if s_reg is None:
-                    # shared across regimes
-                    for s in range(n_states):
-                        out[s]["beta"][j] = float(val)
-                else:
-                    out[s_reg]["beta"][j] = float(val)
+    return np.asarray(targets), np.asarray(rows)
 
-    return out
 
 
 # ======================================================
@@ -252,15 +202,16 @@ class MSGarchEVT:
     Rolling estimation is handled outside: call fit() each refit date on the rolling window.
     """
 
-    def __init__(self, cfg: GarchEVTConfig):
+    def __init__(self, cfg: GarchEVTConfig, verbose: bool = False):
         self.cfg = cfg
+        self.verbose = verbose
 
-        self.ms_res = None
+        self.mean_res = None
         self.garch_res = None
 
-        self._regime_params = None
-        self._last_prob = None
-
+        self._ar_order: Optional[int] = None
+        self._beta: Optional[np.ndarray] = None
+        self._last_y: Optional[np.ndarray] = None
         self.evt_fit: Optional[EVTFit] = None
 
     # -----------------------
@@ -279,40 +230,46 @@ class MSGarchEVT:
         y = np.asarray(y, dtype=float).reshape(-1)
         X_mean = _as_2d(X_mean)
 
-        # --- Markov switching mean ---
-        # Switching intercept; keep exog coefficients non-switching for stability by default.
-        # (If you later want switching betas, expose a flag.)
-        ms_model = MarkovRegression(
-            endog=y,
-            exog=X_mean,
-            k_regimes=self.cfg.n_states,
-            trend="c",
-            switching_variance=False,
-        )
-        self.ms_res = ms_model.fit(disp=False)
+        # --- ARX mean ---
+        p = self.cfg.mean_ar_order  # e.g. 1
 
-        # Extract last filtered regime probabilities
-        # filtered_marginal_probabilities: (T, n_states)
-        filt = np.asarray(self.ms_res.filtered_marginal_probabilities)
-        self._last_prob = filt[-1, :].copy()
+        if X_mean is not None:
+            X_mean = np.asarray(X_mean)
 
-        # Build fitted mean series using smoothed/filtered probs (for residuals)
-        # We'll use filtered probs for causality.
-        reg_params = _extract_regime_params(self.ms_res)
-        self._regime_params = reg_params
+        y_arx, X_arx = _build_arx_design(y, X_mean, p)
 
-        if X_mean is None:
-            mu_reg = np.array([reg_params[s]["const"] for s in range(self.cfg.n_states)], dtype=float)
-            mu_hat = (filt * mu_reg.reshape(1, -1)).sum(axis=1)
-        else:
-            mu_by_state = []
-            for s in range(self.cfg.n_states):
-                mu_s = reg_params[s]["const"] + X_mean @ reg_params[s]["beta"]
-                mu_by_state.append(mu_s)
-            mu_by_state = np.stack(mu_by_state, axis=1)  # (T, n_states)
-            mu_hat = (filt * mu_by_state).sum(axis=1)
+        # OLS
+        beta = np.linalg.lstsq(X_arx, y_arx, rcond=None)[0]
 
+        # Save ARX parameters for forecasting
+        self._ar_order = p
+        self._beta = beta  # includes intercept + AR + exog
+        self._last_y = y[-p:].copy()
+
+
+        # Fitted mean aligned to original y
+        mu_hat = np.full_like(y, np.nan, dtype=float)
+        mu_hat[p:] = X_arx @ beta
         resid = y - mu_hat
+
+        resid = np.asarray(resid, dtype=float)
+
+        # Remove non-finite residuals
+        mask = np.isfinite(resid)
+        n_bad = (~mask).sum()
+
+        if n_bad > 0:
+            if self.verbose:
+                print(f"[GARCH] Dropping {n_bad} non-finite residuals before GARCH fit")
+            resid = resid[mask]
+        # Minimum length required for GARCH
+        min_obs = max(50, 5 * (self.cfg.p + self.cfg.q))
+
+        if resid.shape[0] < min_obs:
+            raise ValueError(
+                f"Too few finite residuals for GARCH "
+                f"(n={resid.shape[0]}, min_required={min_obs})"
+            )
 
         # --- GARCH on residuals (Student-t) ---
         garch = arch_model(
@@ -324,7 +281,11 @@ class MSGarchEVT:
             dist=self.cfg.dist,
             rescale=True,
         )
-        self.garch_res = garch.fit(disp=self.cfg.disp, maxiter=self.cfg.maxiter)
+        self.garch_res = garch.fit(
+            disp=self.cfg.disp,
+            options={"maxiter": self.cfg.maxiter},
+        )
+
 
         # --- EVT on standardized residuals (optional) ---
         if self.cfg.use_evt:
@@ -348,35 +309,46 @@ class MSGarchEVT:
         self,
         X_future: Optional[np.ndarray],
         horizon: int,
-        regime_prob: Optional[np.ndarray] = None,
     ) -> np.ndarray:
         """
-        Forecast conditional mean for horizon steps using last regime probabilities
-        and per-regime intercept+beta.
+        Forecast ARX mean for H steps ahead.
 
         X_future: shape (H, k) or None
         Returns: mu shape (H,)
         """
-        if self._regime_params is None or self._last_prob is None:
+        if not hasattr(self, "_beta"):
             raise RuntimeError("Model not fitted. Call fit() first.")
 
-        H = int(horizon)
-        X_future = _as_2d(X_future)
+        beta = self._beta
+        p = self._ar_order
 
-        p = self._last_prob if regime_prob is None else np.asarray(regime_prob, dtype=float).reshape(-1)
-        p = p / p.sum()
+        # Split coefficients
+        idx = 0
+        intercept = beta[idx]
+        idx += 1
 
-        if X_future is None:
-            mu_reg = np.array([self._regime_params[s]["const"] for s in range(self.cfg.n_states)], dtype=float)
-            return np.repeat((p * mu_reg).sum(), H)
+        ar_coefs = beta[idx : idx + p]
+        idx += p
 
-        mu_by_state = []
-        for s in range(self.cfg.n_states):
-            mu_s = self._regime_params[s]["const"] + X_future @ self._regime_params[s]["beta"]
-            mu_by_state.append(mu_s)
-        mu_by_state = np.stack(mu_by_state, axis=1)  # (H, n_states)
-        mu = (mu_by_state * p.reshape(1, -1)).sum(axis=1)
+        exog_coefs = beta[idx:] if X_future is not None else None
+
+        # Initialize with last observed y's
+        y_hist = list(self._last_y)
+        mu = np.zeros(horizon, dtype=float)
+
+        for h in range(horizon):
+            ar_part = sum(ar_coefs[i] * y_hist[-(i + 1)] for i in range(p))
+            exog_part = (
+                np.dot(exog_coefs, X_future[h]) if exog_coefs is not None else 0.0
+            )
+
+            mu_h = intercept + ar_part + exog_part
+            mu[h] = mu_h
+
+            y_hist.append(mu_h)  # recursive forecast
+
         return mu
+
 
     # -----------------------
     # Forecast samples

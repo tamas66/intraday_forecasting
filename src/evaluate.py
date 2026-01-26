@@ -1,133 +1,251 @@
-from pathlib import Path
-import json
+# src/evaluate.py
+from __future__ import annotations
 
+from pathlib import Path
+from typing import Dict, Literal
+
+import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 from omegaconf import DictConfig
 import hydra
-
-from evaluation.compare import run_comparison
+from scipy.stats import norm
 
 
 # ======================================================
-# PLOTTING
+# CRPS implementations
 # ======================================================
 
-def _plot_fixed_split(cfg: DictConfig, results: dict, target: str):
-    plt.figure(figsize=(14, 6))
-    fixed_models = {
-        k: v for k, v in results.items()
-        if v.get("evaluation") == "fixed_split"
+def crps_from_samples(samples: np.ndarray, y: float) -> float:
+    """
+    CRPS for empirical distribution given samples.
+    samples: shape (M,)
+    """
+    samples = np.asarray(samples, dtype=float)
+    y = float(y)
+
+    term1 = np.mean(np.abs(samples - y))
+    term2 = 0.5 * np.mean(np.abs(samples[:, None] - samples[None, :]))
+    return term1 - term2
+
+
+def crps_from_quantiles(
+    quantiles: np.ndarray,
+    taus: np.ndarray,
+    y: float,
+) -> float:
+    """
+    CRPS from quantile forecasts using the pinball-loss identity.
+
+    quantiles: shape (Q,)
+    taus: shape (Q,)
+    """
+    y = float(y)
+    q = np.asarray(quantiles, dtype=float)
+    tau = np.asarray(taus, dtype=float)
+
+    return np.mean(
+        (tau - (y <= q).astype(float)) * (y - q)
+    ) * 2.0
+
+
+# ======================================================
+# Distribution loaders
+# ======================================================
+
+def load_garch_distribution(path: Path, h: int) -> np.ndarray:
+    """
+    Load samples for a specific horizon step.
+    """
+    samples = np.load(path)  # shape (M, H)
+    return samples[:, h]
+
+
+def load_lstm_distribution(path: Path, h: int) -> Dict[str, np.ndarray]:
+    """
+    Load quantiles and spike prob for a horizon step.
+    """
+    data = np.load(path)
+    return {
+        "quantiles": data["quantiles"][h],
+        "taus": data["taus"],
+        "spike_prob": data["spike_prob"][h],
     }
-    if not fixed_models:
-        return
 
-    first = next(iter(fixed_models.values()))
-    timestamps = first["timestamps"]
-    y_true = first["y_true"]
+# ======================================================
+# PIT
+# ======================================================
+# ======================================================
+# CRPS-consistent residual diagnostics
+# ======================================================
 
-    plt.plot(timestamps, y_true, label="Actual", linewidth=2)
-
-    for model_name, res in fixed_models.items():
-        plt.plot(res["timestamps"], res["y_pred"], label=model_name, alpha=0.85)
-
-    plt.title(f"Fixed-split comparison – {target}")
-    plt.xlabel("Time")
-    plt.ylabel("Price")
-    plt.legend()
-    plt.tight_layout()
-
-    out = Path(cfg.data.paths.results_dir) / f"forecast_comparison_fixed_{target}.png"
-    plt.savefig(out, dpi=150)
-    plt.close()
-
-
-def _plot_rolling_arx(cfg: DictConfig, target: str, max_points: int = 24 * 60):
+def pit_from_samples(samples: np.ndarray, y: float) -> float:
     """
-    Plot Rolling / Expanding ARX forecast vs actual.
-    Uses the saved CSV from rolling_arx.py.
+    Probability Integral Transform using empirical samples.
     """
-    csv_path = Path(cfg.data.paths.results_dir) / f"rolling_arx_{target}.csv"
-    if not csv_path.exists():
-        print(f"[Plot] Rolling ARX CSV not found: {csv_path}")
-        return
-
-    df = pd.read_csv(csv_path, parse_dates=["timestamp"], index_col="timestamp")
-
-    if len(df) == 0:
-        print("[Plot] Rolling ARX CSV is empty.")
-        return
-
-    if len(df) > max_points:
-        df = df.iloc[-max_points:]
-
-    plt.figure(figsize=(14, 6))
-    plt.plot(df.index, df["y_true"], label="Actual", linewidth=2)
-    plt.plot(df.index, df["y_pred"], label="Rolling ARX", alpha=0.85)
-
-    plt.title(f"Rolling ARX (expanding refit) – {target}")
-    plt.xlabel("Time")
-    plt.ylabel("Price")
-    plt.legend()
-    plt.tight_layout()
-
-    out = Path(cfg.data.paths.results_dir) / f"forecast_rolling_arx_{target}.png"
-    plt.savefig(out, dpi=150)
-    plt.close()
-
-    print(f"[Plot] Saved rolling ARX plot to: {out}")
+    samples = np.asarray(samples, dtype=float)
+    return float(np.mean(samples <= y))
 
 
-# ======================================================
-# SUMMARY
-# ======================================================
+def pit_from_quantiles(
+    quantiles: np.ndarray,
+    taus: np.ndarray,
+    y: float,
+) -> float:
+    """
+    Approximate PIT using quantile function inversion.
+    """
+    q = np.asarray(quantiles, dtype=float)
+    tau = np.asarray(taus, dtype=float)
 
-def _build_summary_table(results: dict) -> pd.DataFrame:
-    rows = []
+    if y <= q.min():
+        return float(tau[0])
+    if y >= q.max():
+        return float(tau[-1])
 
-    for model, res in results.items():
-        rows.append(
-            {
-                "model": model,
-                "evaluation": res.get("evaluation", "fixed_split"),
-                "rmse": res["rmse"],
-                "mae": res["mae"],
-                "train_time_sec": res["train_time"],
-            }
-        )
+    return float(np.interp(y, q, tau))
 
-    df = pd.DataFrame(rows).set_index("model")
-    return df.sort_values(["evaluation", "rmse"])
+
+def quantile_residual(pit: float) -> float:
+    """
+    Normalised PIT residual ~ N(0,1) if calibrated.
+    """
+    eps = 1e-10
+    pit = np.clip(pit, eps, 1 - eps)
+    return float(norm.ppf(pit))
+
 
 
 # ======================================================
-# MAIN
+# Main evaluation
 # ======================================================
 
-@hydra.main(version_base=None, config_path="../configs", config_name="config")
-def main(cfg: DictConfig):
-    target = cfg.target
+def evaluate_run(run_dir: Path, verbose: bool = True) -> pd.DataFrame:
+    """
+    Evaluate a single model run directory.
+    """
+    index_path = run_dir / "forecast_index.parquet"
+    if not index_path.exists():
+        raise FileNotFoundError(index_path)
 
-    results_dir = Path(cfg.data.paths.results_dir)
-    results_dir.mkdir(parents=True, exist_ok=True)
+    df = pd.read_parquet(index_path)
 
-    results = run_comparison(
-        cfg=cfg,
-        target=target,
-        force_retrain=False,
+    crps_values = []
+    pit_values = []
+    qres_values = []
+
+    for _, row in df.iterrows():
+        y = row["y_true"]
+        h = int(row["horizon"]) - 1
+        dist_path = Path(row["dist_path"])
+
+        if row["dist_kind"] == "samples":
+            samples = load_garch_distribution(dist_path, h)
+            crps = crps_from_samples(samples, y)
+            pit = pit_from_samples(samples, y)
+
+        elif row["dist_kind"] == "quantiles":
+            d = load_lstm_distribution(dist_path, h)
+            crps = crps_from_quantiles(d["quantiles"], d["taus"], y)
+            pit = pit_from_quantiles(d["quantiles"], d["taus"], y)
+
+        else:
+            raise ValueError(f"Unknown dist_kind: {row['dist_kind']}")
+
+        crps_values.append(crps)
+        pit_values.append(pit)
+        qres_values.append(quantile_residual(pit))
+
+    df["crps"] = crps_values
+    df["pit"] = pit_values
+    df["qres"] = qres_values
+
+    return df
+
+
+# ======================================================
+# Aggregations
+# ======================================================
+
+def aggregate_crps(df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
+    """
+    Produce standard aggregation tables.
+    """
+    out = {}
+
+    out["by_horizon"] = (
+        df.groupby(["model", "horizon"])
+        .crps.mean()
+        .reset_index()
+        .sort_values(["model", "horizon"])
     )
 
-    _plot_fixed_split(cfg, results, target)
-    _plot_rolling_arx(cfg, target)
+    out["by_hour"] = (
+        df.assign(hour=lambda x: pd.to_datetime(x.target_time).dt.hour)
+        .groupby(["model", "hour"])
+        .crps.mean()
+        .reset_index()
+        .sort_values(["model", "hour"])
+    )
 
-    summary = _build_summary_table(results)
+    out["overall"] = (
+        df.groupby("model")
+        .crps.mean()
+        .reset_index()
+    )
 
-    out_csv = results_dir / f"model_comparison_{target}.csv"
-    summary.to_csv(out_csv)
+    return out
 
-    print("\nModel comparison summary:\n")
-    print(summary.round(4))
-    print(f"\nSaved summary to: {out_csv}")
+
+# ======================================================
+# Hydra entry point
+# ======================================================
+
+@hydra.main(
+    version_base=None,
+    config_path="../configs",
+    config_name="config",
+)
+def main(cfg: DictConfig) -> None:
+    """
+    Evaluate all trained models for a given target & horizon.
+    """
+    target = cfg.get("target", "level")
+
+    base_dir = Path(cfg.data.paths.models_dir) / target
+
+    all_rows = []
+
+    for model_dir in base_dir.iterdir():
+        if not model_dir.is_dir():
+            continue
+
+        if (model_dir / "forecast_index.parquet").exists():
+            if cfg.get("verbose", True):
+                print(f"[EVAL] Evaluating {model_dir.name}")
+
+            df_model = evaluate_run(model_dir)
+            all_rows.append(df_model)
+
+    if not all_rows:
+        raise RuntimeError("No forecast_index.parquet found")
+
+    df_all = pd.concat(all_rows, ignore_index=True)
+
+    out_dir = (
+        Path(cfg.paths.outputs_dir)
+        / target
+        / f"horizon_{cfg.horizon}"
+    )
+    out_dir.mkdir(parents=True, exist_ok=True)
+    # Save raw CRPS
+    df_all.to_parquet(out_dir / "crps_raw.parquet", index=False)
+
+    # Aggregates
+    aggs = aggregate_crps(df_all)
+    for name, df_agg in aggs.items():
+        df_agg.to_parquet(out_dir / f"crps_{name}.parquet", index=False)
+
+    print(f"[EVAL] Results written to {out_dir}")
 
 
 if __name__ == "__main__":

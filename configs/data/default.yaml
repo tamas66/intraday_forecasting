@@ -18,125 +18,91 @@ dataframe:
 
 # Column Registries from model_config.py
 features:
-  model:
-    core_mean_exog:
-      - "da_price"
-      - "demand_actual"
-      - "demand_error"
-    
-    all_mean_exog:
-      - "da_price"
-      - "demand_actual"
-      - "demand_error"
-      - "demand_actual_lag1"
-      - "demand_actual_lag24"
-      - "wind_outturn"
-      - "wind_error"
-      - "wind_outturn_lag1"
-      - "wind_outturn_lag24"
-      - "solar_outturn"
-      - "solar_error"
-      - "solar_outturn_lag1"
-      - "hour_sin"
-      - "hour_cos"
-      - "dow_sin"
-      - "dow_cos"
-      - "is_weekend"
+  core_features:
+  # Prices & spreads
+  - intraday_wap
+  - da_price
 
-    variance_exog:
-      - "abs_demand_error"
-      - "abs_wind_error"
-      - "abs_solar_error"
-      - "abs_id_da_spread"
-      - "is_peak_15_18"
-      - "abs_return_lag1"
+  # Wind fundamentals
+  - wind_outturn
+  - wind_forecast_ng
 
-  preprocessing:
-    core_features:
-    # Prices & spreads
-    - intraday_wap
-    - da_price
+  # Solar fundamentals
+  - solar_outturn
+  - solar_forecast_ng
 
-    # Wind fundamentals
-    - wind_outturn
-    - wind_forecast_ng
+  # Demand
+  - demand_actual
+  - demand_da_forecast
 
-    # Solar fundamentals
-    - solar_outturn
-    - solar_forecast_ng
+  # Seasonality / calendar
+  - hour_sin
+  - hour_cos
+  - dow_sin
+  - dow_cos
+  - is_weekend
 
-    # Demand
-    - demand_actual
-    - demand_da_forecast
+  # Errors / residuals
+  - wind_error
+  - solar_error
+  - demand_error
+  - "abs_demand_error"
+  - "abs_wind_error"
+  - "abs_solar_error"
+  - "abs_id_da_spread"
+  - "is_peak_15_18"
 
-    # Seasonality / calendar
-    - hour_sin
-    - hour_cos
-    - dow_sin
-    - dow_cos
-    - is_weekend
+extended_features:
+  # Prices & spreads
+  - intraday_wap
+  - da_price
 
-    # Errors / residuals
-    - wind_error
-    - solar_error
-    - demand_error
-    - "abs_demand_error"
-    - "abs_wind_error"
-    - "abs_solar_error"
-    - "abs_id_da_spread"
-    - "is_peak_15_18"
+  # Demand (level + key forecast)
+  - demand_actual
+  - demand_da_forecast
 
-  baseline_features:
-    # Prices & spreads
-    - intraday_wap
-    - da_price
+  # Wind fundamentals
+  - wind_outturn
+  - wind_forecast_ng
+  - wind_capacity
+  - wind_penetration
+  - wind_outturn_delta_1
+  - wind_outturn_delta_4
 
-    # Demand (level + key forecast)
-    - demand_actual
-    - demand_da_forecast
+  # Solar fundamentals
+  - solar_outturn
+  - solar_forecast_ng
+  - solar_capacity
+  - solar_outturn_delta_1
+  - solar_outturn_delta_4
 
-    # Wind fundamentals
-    - wind_outturn
-    - wind_forecast_ng
-    - wind_capacity
-    - wind_penetration
-    - wind_outturn_delta_1
-    - wind_outturn_delta_4
+  # Conventional generation stack (coarse)
+  - gen_ccgt
+  - gen_nuclear
+  - gen_biomass
+  - gen_hydro
+  - gen_total_conventional
 
-    # Solar fundamentals
-    - solar_outturn
-    - solar_forecast_ng
-    - solar_capacity
-    - solar_outturn_delta_1
-    - solar_outturn_delta_4
+  # Interconnection & foreign prices
+  - interconnector_total
+  - price_france
+  - price_netherlands
+  - price_norway
+  - price_isem
 
-    # Conventional generation stack (coarse)
-    - gen_ccgt
-    - gen_nuclear
-    - gen_biomass
-    - gen_hydro
-    - gen_total_conventional
+  # Seasonality / calendar
+  - hour_sin
+  - hour_cos
+  - dow_sin
+  - dow_cos
+  - is_weekend
 
-    # Interconnection & foreign prices
-    - interconnector_total
-    - price_france
-    - price_netherlands
-    - price_norway
-    - price_isem
-
-    # Seasonality / calendar
-    - hour_sin
-    - hour_cos
-    - dow_sin
-    - dow_cos
-    - is_weekend
-
-    # Rolling statistics for price dynamics
-    - intraday_wap_rollmean_4
-    - intraday_wap_rollstd_4
-    - intraday_wap_rollmean_12
-    - intraday_wap_rollstd_12
-    - da_price_rollmean_4
-    - da_price_rollstd_4
-    - da_price_rollmean_12
-    - da_price_rollstd_12
+  # Rolling statistics for price dynamics
+  - intraday_wap_rollmean_4
+  - intraday_wap_rollstd_4
+  - intraday_wap_rollmean_12
+  - intraday_wap_rollstd_12
+  - da_price_rollmean_4
+  - da_price_rollstd_4
+  - da_price_rollmean_12
+  - da_price_rollstd_12

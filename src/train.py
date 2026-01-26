@@ -10,8 +10,8 @@ import torch
 from omegaconf import DictConfig, OmegaConf
 
 from data import load_dataset, Seq2SeqDataset
-from modelling.garchx import garch_from_hydra
-from modelling.lstm import lstm_from_hydra, quantile_loss, spike_bce_loss
+from models.garchx import garch_from_hydra
+from models.lstm import lstm_from_hydra, quantile_loss, spike_bce_loss
 
 
 # ======================================================
@@ -28,7 +28,8 @@ def _get_model_run_dir(cfg: DictConfig, target: str, model_name: str) -> Path:
     Required by you:
       cfg.data.paths.models_dir/{target}/{model_name}
     """
-    root = Path(cfg.data.paths.models_dir) / target / model_name
+    root = Path(cfg.data.paths.models_dir) / target / model_name / f"horizon_{cfg.horizon}/"
+
     return _ensure_dir(root)
 
 
@@ -307,15 +308,23 @@ def run_rolling_training(
         # Fit + forecast
         # -----------------------------
         if model_name == "garch":
-            garch = garch_from_hydra(cfg)  # should read cfg.model internally
+            garch = garch_from_hydra(cfg)
 
             y_train = df_win["y"].values
-            mean_cols = list(model_cfg.mean.exogenous) if "mean" in model_cfg and "exogenous" in model_cfg.mean else []
+            mean_cols = list(cfg.model.mean.exogenous)
             X_mean = df_win[mean_cols].values if mean_cols else None
 
-            garch.fit(y=y_train, X_mean=X_mean)
+            fitted = False
+            try:
+                garch.fit(y=y_train, X_mean=X_mean)
+                fitted = True
+            except Exception as e:
+                print(f"[GARCH] Skipping refit at {refit_date}: {e}")
 
-            M = int(model_cfg.forecast.simulation_draws)
+            if not fitted:
+                continue
+
+            M = int(cfg.model.forecast.simulation_draws)
 
             for origin in seg_origins:
                 fut = df.loc[origin:].iloc[:horizon]
@@ -323,7 +332,10 @@ def run_rolling_training(
                     continue
 
                 X_future = fut[mean_cols].values if mean_cols else None
-                samples = garch.forecast_samples(X_future=X_future, horizon=horizon, n_sim=M)
+                if fitted:
+                    samples = garch.forecast_samples(X_future=X_future, horizon=horizon, n_sim=M)
+                else:
+                    continue
 
                 y_true = fut["y"].values
 

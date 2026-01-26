@@ -212,8 +212,8 @@ thesis_documents/
 outputs/
 notebooks/
 prompt.txt
-*.parquet
 *.png
 *.pdf
 .env
 *.txt
+.vscode

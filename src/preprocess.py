@@ -8,8 +8,8 @@ import hydra
 import pandas as pd
 from omegaconf import DictConfig
 
-import etl.api as api
-import etl.transform as transform
+import helpers.api as api
+import helpers.transform as transform
 """
 Data pipeline for Great Britain power market data.
 
@@ -260,7 +260,7 @@ def load_and_save_working_subset(
     cfg: DictConfig,
     start_date: datetime | str,
     end_date: datetime | str,
-    features: Literal["core", "baseline"] | None = None,
+    features: Literal["core", "extended"] | None = None,
     force_refresh: bool = False,
 ) -> pd.DataFrame:
     # 1. Trigger the processing/loading chain
@@ -268,9 +268,9 @@ def load_and_save_working_subset(
 
     # 2. Column selection
     if features == "core":
-        cols = cfg.data.features.preprocessing.core_features
-    elif features == "baseline":
-        cols = cfg.data.features.preprocessing.baseline_features
+        cols = cfg.data.features.core_features
+    elif features == "extended":
+        cols = cfg.data.features.extended_features
     else:
         cols = df.columns.tolist()
 
