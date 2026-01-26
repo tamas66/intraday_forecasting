@@ -1,14 +1,56 @@
 name: "lstm"
+
 data:
-  sequence_length: 24
+  lookback_length: 24        # L, Hydra-controlled
+  forecast_horizon: 24  # H, injected globally
   batch_size: 64
+
+  # Feature groups (resolved in data loader)
+  past_features:
+    - intraday_wap
+    - da_price
+    - wind_outturn
+    - solar_outturn
+    - demand_actual
+    - wind_error
+    - solar_error
+    - demand_error
+
+  known_future_features:
+    - da_price        # only when available (cutoff logic)
+    - hour_sin
+    - hour_cos
+    - dow_sin
+    - dow_cos
+    - is_weekend
+
+spikes:
+  use_evt: true
+  upper_threshold: 3.0
+  lower_threshold: -3.0
+
 architecture:
-  input_size: 1
-  hidden_size: 32
-  num_layers: 1
-  dropout: 0.0
+  encoder:
+    hidden_size: 32
+    num_layers: 1
+    dropout: 0.0
+
+  decoder:
+    hidden_size: 32
+    num_layers: 1
+
+  outputs:
+    quantiles: [0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99]
+    spike_probability: true   # sigmoid head
+
 training:
   learning_rate: 0.001
   num_epochs: 10
+  retrain_frequency: "monthly"
+  loss:
+    quantile: true
+    spike_bce: true
+    spike_weight: 1.0
+
 runtime:
   device: "cpu"

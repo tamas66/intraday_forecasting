@@ -1,7 +1,14 @@
 defaults:
   - api: default
   - data: default
+  - model: lstm
   - _self_
 
+# Manually include both models under their own keys
+models:
+  lstm: ${oc.dict.values:model/lstm} # This requires specific Hydra plugins
+  garch: ${oc.dict.values:model/garch}
+
 target: level        # or spread
-dataset: core_2020-01-01_2025-12-31
+dataset: core_20200101_20251231
+horizon: 24          # forecast horizon H

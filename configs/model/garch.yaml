@@ -1,7 +1,35 @@
 name: "garch"
-p: 1
-q: 1
-dist: "t"
-use_exogenous: true
-mean_exog: ${data.features.core_mean_exog}
-var_exog: ${data.features.variance_exog}
+
+rolling:
+  window_days: 730
+  refit_frequency: "monthly"
+
+regimes:
+  n_states: 2
+  switching: "markov"
+
+mean:
+  ar_order: 1
+  include_constant: true
+  exogenous: ${data.features.core_mean_exog}
+
+variance:
+  model: "garch"
+  p: 1
+  q: 1
+  exogenous: ${data.features.variance_exog}
+
+distribution:
+  core: "student_t"
+
+spikes:
+  use_evt: true
+  threshold_type: "fixed"
+  upper_threshold: 3.0
+  lower_threshold: -3.0
+  evt_dist: "gpd"
+  separate_tails: true
+
+forecast:
+  horizon: ${horizon}
+  simulation_draws: 1000   # for CRPS via sampling

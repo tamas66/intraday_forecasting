@@ -43,30 +43,24 @@ def load_dataset(
     df["id_da_spread"] = df["intraday_wap"] - df["da_price"]
 
     if target == "level":
-        df["y"] = df["intraday_wap"]
+        base_col = "intraday_wap"
     elif target == "spread":
-        df["y"] = df["id_da_spread"]
+        base_col = "id_da_spread"
     else:
         raise ValueError("target must be 'level' or 'spread'")
+    df["y"] = df[base_col]
+    for lag in [1, 24]:
+        df[f"{base_col}_lag{lag}"] = df[base_col].shift(lag)
 
-    # --------------------------------------------------
-    # Spread-specific cleanup
-    # --------------------------------------------------
+    df["abs_return"] = df[base_col].diff().abs()
+    df["abs_return_lag1"] = df["abs_return"].shift(1)
+
     if target == "spread":
         df = df.drop(columns=["da_price"], errors="ignore")
 
-    # --------------------------------------------------
-    # Final cleaning
-    # --------------------------------------------------
     if drop_na:
-        before = len(df)
         df = df.dropna()
-        if verbose:
-            print(f"Dropped {before - len(df)} rows with NA")
 
-    # --------------------------------------------------
-    # Train / test split
-    # --------------------------------------------------
     if train_end_date and test_start_date:
         train_df = df[df.index <= train_end_date].copy()
         test_df = df[df.index >= test_start_date].copy()
@@ -76,7 +70,7 @@ def load_dataset(
 
 
 # ======================================================
-# GENERIC PARAMETRIC LOADER (NO MODEL ASSUMPTIONS)
+# GENERIC PARAMETRIC LOADER
 # ======================================================
 
 def load_parametric_data(
@@ -85,11 +79,6 @@ def load_parametric_data(
     target: Literal["level", "spread"] = "level",
     verbose: bool = True,
 ):
-    """
-    Load generic parametric data.
-    Model-specific feature selection happens downstream.
-    """
-
     file_path = (
         f"{cfg.data.paths.final_data_dir}/"
         f"{cfg.dataset}.parquet"
@@ -116,35 +105,77 @@ def load_parametric_data(
 
 
 # ======================================================
-# LSTM DATASET
+# SEQ2SEQ LSTM DATASET (MULTIVARIATE, QUANTILE + SPIKES)
 # ======================================================
 
-class SequenceDataset(Dataset):
-    def __init__(self, series: np.ndarray, seq_len: int):
-        self.series = series
-        self.seq_len = seq_len
+class Seq2SeqDataset(Dataset):
+    """
+    Seq2Seq dataset for probabilistic LSTM forecasting.
+    """
+
+    def __init__(
+        self,
+        df: pd.DataFrame,
+        past_features: list[str],
+        future_features: list[str],
+        lookback: int,
+        horizon: int,
+        upper_threshold: float,
+        lower_threshold: float,
+        rolling_std_window: int = 168,
+    ):
+        self.df = df
+        self.past_features = past_features
+        self.future_features = future_features
+        self.L = lookback
+        self.H = horizon
+
+        baseline = df.get("da_price", df["y"].rolling(24).mean())
+        resid = df["y"] - baseline
+        scale = resid.rolling(rolling_std_window).std()
+        z = resid / scale
+
+        self.spike_pos = (z > upper_threshold).astype(int)
+        self.spike_neg = (z < lower_threshold).astype(int)
+
+        self.valid_idx = np.arange(self.L, len(df) - self.H)
 
     def __len__(self):
-        return len(self.series) - self.seq_len
+        return len(self.valid_idx)
 
-    def __getitem__(self, idx):
-        x = self.series[idx : idx + self.seq_len]
-        y = self.series[idx + self.seq_len]
-        return (
-            torch.tensor(x, dtype=torch.float32).unsqueeze(-1),
-            torch.tensor(y, dtype=torch.float32),
+    def __getitem__(self, i):
+        t = self.valid_idx[i]
+
+        enc = self.df[self.past_features].iloc[t - self.L : t].values
+        dec = self.df[self.future_features].iloc[t : t + self.H].values
+        y = self.df["y"].iloc[t : t + self.H].values
+
+        spike = np.stack(
+            [
+                self.spike_pos.iloc[t : t + self.H].values,
+                self.spike_neg.iloc[t : t + self.H].values,
+            ],
+            axis=-1,
         )
 
+        return (
+            torch.tensor(enc, dtype=torch.float32),
+            torch.tensor(dec, dtype=torch.float32),
+            torch.tensor(y, dtype=torch.float32),
+            torch.tensor(spike, dtype=torch.float32),
+        )
+
+
+# ======================================================
+# LSTM DATA LOADER
+# ======================================================
 
 def load_lstm_data(
     *,
     cfg: DictConfig,
     target: Literal["level", "spread"] = "level",
     verbose: bool = True,
-) -> Tuple[DataLoader, DataLoader, pd.DatetimeIndex, int]:
-    """
-    Load univariate LSTM data.
-    """
+) -> Tuple[DataLoader, DataLoader, pd.DatetimeIndex]:
 
     file_path = (
         f"{cfg.data.paths.final_data_dir}/"
@@ -160,30 +191,43 @@ def load_lstm_data(
         verbose=verbose,
     )
 
-    y_train = train_df["y"].values
-    y_test = test_df["y"].values
+    lookback = cfg.model.lstm.data.lookback_length
+    horizon = cfg.model.lstm.data.forecast_horizon
 
-    seq_len = cfg.model.lstm.data.sequence_length
-    batch_size = cfg.model.lstm.data.batch_size
+    ds_train = Seq2SeqDataset(
+        df=train_df,
+        past_features=cfg.model.lstm.data.past_features,
+        future_features=cfg.model.lstm.data.known_future_features,
+        lookback=lookback,
+        horizon=horizon,
+        upper_threshold=cfg.model.lstm.spikes.upper_threshold,
+        lower_threshold=cfg.model.lstm.spikes.lower_threshold,
+    )
 
-    train_ds = SequenceDataset(y_train, seq_len)
-    test_ds = SequenceDataset(y_test, seq_len)
+    ds_test = Seq2SeqDataset(
+        df=test_df,
+        past_features=cfg.model.lstm.data.past_features,
+        future_features=cfg.model.lstm.data.known_future_features,
+        lookback=lookback,
+        horizon=horizon,
+        upper_threshold=cfg.model.lstm.spikes.upper_threshold,
+        lower_threshold=cfg.model.lstm.spikes.lower_threshold,
+    )
 
     train_loader = DataLoader(
-        train_ds,
-        batch_size=batch_size,
+        ds_train,
+        batch_size=cfg.model.lstm.data.batch_size,
         shuffle=True,
         drop_last=True,
     )
 
     test_loader = DataLoader(
-        test_ds,
-        batch_size=batch_size,
+        ds_test,
+        batch_size=cfg.model.lstm.data.batch_size,
         shuffle=False,
         drop_last=False,
     )
 
-    test_timestamps = test_df.index[seq_len:]
-    param_length = len(train_df)
+    test_timestamps = test_df.index[lookback : lookback + len(ds_test)]
 
-    return train_loader, test_loader, test_timestamps, param_length
+    return train_loader, test_loader, test_timestamps

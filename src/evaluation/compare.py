@@ -8,7 +8,7 @@ from omegaconf import DictConfig
 import hydra
 
 from data import load_parametric_data, load_lstm_data
-from src.modelling.statistical import SARIMAXModel, GARCHModel
+from src.modelling.garchx import SARIMAXModel, GARCHModel
 from src.modelling.lstm import LSTMModel
 from evaluation.metrics import compute_metrics
 from train import train_lstm

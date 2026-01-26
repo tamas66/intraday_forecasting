@@ -4,6 +4,7 @@ from typing import List, Tuple, Optional
 
 import hydra
 from omegaconf import DictConfig
+import holidays
 
 # ======================
 # INDEX & ALIGNMENT UTILITIES
@@ -70,20 +71,42 @@ def clean_base_dataframe(
 # FEATURE ENGINEERING
 # ======================
 
-def add_calendar_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Add cyclical hour/day-of-week features and weekend flag."""
+
+
+def add_calendar_features(df: pd.DataFrame, country: str = "UK") -> pd.DataFrame:
+    """Add cyclical features, bank holidays, and specific GB market flags."""
     df = df.copy()
     idx = df.index
 
+    # 1. Cyclical Hours (24h)
     hours = idx.hour
     df["hour_sin"] = np.sin(2 * np.pi * hours / 24)
     df["hour_cos"] = np.cos(2 * np.pi * hours / 24)
 
+    # 2. Cyclical Day of Week (7d)
     dow = idx.dayofweek
     df["dow_sin"] = np.sin(2 * np.pi * dow / 7)
     df["dow_cos"] = np.cos(2 * np.pi * dow / 7)
+    
+    # 3. Cyclical Month (12m) - Important for heating/cooling seasonality
+    month = idx.month - 1 # 0-indexed for sine/cos
+    df["month_sin"] = np.sin(2 * np.pi * month / 12)
+    df["month_cos"] = np.cos(2 * np.pi * month / 12)
 
-    df["is_weekend"] = dow >= 5
+    # 4. Binary Flags
+    df["is_weekend"] = (dow >= 5).astype(int)
+    
+    # Bank Holidays (UK specific)
+    uk_holidays = holidays.CountryHoliday(country)
+    df["is_holiday"] = pd.Series(idx).apply(lambda x: x in uk_holidays).values.astype(int)
+    
+    # "Sunday-like" behavior: treat holidays as weekends
+    df["is_off_day"] = ((df["is_weekend"] == 1) | (df["is_holiday"] == 1)).astype(int)
+
+    # 5. Energy Market Specifics
+    # Peak Pricing usually 16:00 - 19:00 in GB (Triads/Winter peaks)
+    df["is_peak_15_18"] = ((hours >= 15) & (hours <= 18)).astype(int)
+    
     return df
 
 
@@ -307,12 +330,6 @@ def build_feature_dataframe(
     df = add_rolling_features(df, ["intraday_wap", "da_price"], [4, 12, 24])
 
     # --------------------------------------------------
-    # Endogenous lags
-    # --------------------------------------------------
-    df["y_lag1"] = df["y"].shift(1)
-    df["y_lag24"] = df["y"].shift(24)
-
-    # --------------------------------------------------
     # Exogenous lags
     # --------------------------------------------------
     for var in ["demand_actual", "wind_outturn"]:
@@ -320,7 +337,7 @@ def build_feature_dataframe(
         df[f"{var}_lag24"] = df[var].shift(24)
 
     df["solar_outturn_lag1"] = df["solar_outturn"].shift(1)
-
+    df["id_da_spread"] = df["intraday_wap"] - df["da_price"]
     # --------------------------------------------------
     # Variance regressors
     # --------------------------------------------------
@@ -328,7 +345,6 @@ def build_feature_dataframe(
     df["abs_wind_error"] = df["wind_error"].abs()
     df["abs_solar_error"] = df["solar_error"].abs()
     df["abs_id_da_spread"] = df["id_da_spread"].abs()
-    df["is_peak_15_18"] = df["hour"].between(15, 18).astype(int)
 
     return df
 

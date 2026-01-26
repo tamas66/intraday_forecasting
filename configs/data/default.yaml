@@ -49,6 +49,7 @@ features:
       - "abs_solar_error"
       - "abs_id_da_spread"
       - "is_peak_15_18"
+      - "abs_return_lag1"
 
   preprocessing:
     core_features:
@@ -75,12 +76,20 @@ features:
     - dow_cos
     - is_weekend
 
+    # Errors / residuals
+    - wind_error
+    - solar_error
+    - demand_error
+    - "abs_demand_error"
+    - "abs_wind_error"
+    - "abs_solar_error"
+    - "abs_id_da_spread"
+    - "is_peak_15_18"
+
   baseline_features:
     # Prices & spreads
     - intraday_wap
     - da_price
-    - ssp
-    - sbp
 
     # Demand (level + key forecast)
     - demand_actual

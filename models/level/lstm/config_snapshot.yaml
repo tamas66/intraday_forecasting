@@ -1,0 +1,177 @@
+api:
+  api:
+    user: Global
+    password: '205225240236229161211244239242237183223195239230230229229198236239239242'
+  settings:
+    resolution: hourly
+    timezone: UTC
+    currency: EUR
+data:
+  paths:
+    raw_data_dir: data/raw
+    processed_data_dir: data/processed
+    final_data_dir: data/final
+    results_dir: outputs/results
+    models_dir: models
+    eda_dir: outputs/eda
+  target_map:
+    level: intraday_wap
+    spread: id_da_spread
+  dataframe:
+    index_name: timestamp
+    target_col: ${data.target_map.${target}}
+  features:
+    model:
+      core_mean_exog:
+      - da_price
+      - demand_actual
+      - demand_error
+      all_mean_exog:
+      - da_price
+      - demand_actual
+      - demand_error
+      - demand_actual_lag1
+      - demand_actual_lag24
+      - wind_outturn
+      - wind_error
+      - wind_outturn_lag1
+      - wind_outturn_lag24
+      - solar_outturn
+      - solar_error
+      - solar_outturn_lag1
+      - hour_sin
+      - hour_cos
+      - dow_sin
+      - dow_cos
+      - is_weekend
+      variance_exog:
+      - abs_demand_error
+      - abs_wind_error
+      - abs_solar_error
+      - abs_id_da_spread
+      - is_peak_15_18
+      - abs_return_lag1
+    preprocessing:
+      core_features:
+      - intraday_wap
+      - da_price
+      - wind_outturn
+      - wind_forecast_ng
+      - solar_outturn
+      - solar_forecast_ng
+      - demand_actual
+      - demand_da_forecast
+      - hour_sin
+      - hour_cos
+      - dow_sin
+      - dow_cos
+      - is_weekend
+      - wind_error
+      - solar_error
+      - demand_error
+      - abs_demand_error
+      - abs_wind_error
+      - abs_solar_error
+      - abs_id_da_spread
+      - is_peak_15_18
+    baseline_features:
+    - intraday_wap
+    - da_price
+    - demand_actual
+    - demand_da_forecast
+    - wind_outturn
+    - wind_forecast_ng
+    - wind_capacity
+    - wind_penetration
+    - wind_outturn_delta_1
+    - wind_outturn_delta_4
+    - solar_outturn
+    - solar_forecast_ng
+    - solar_capacity
+    - solar_outturn_delta_1
+    - solar_outturn_delta_4
+    - gen_ccgt
+    - gen_nuclear
+    - gen_biomass
+    - gen_hydro
+    - gen_total_conventional
+    - interconnector_total
+    - price_france
+    - price_netherlands
+    - price_norway
+    - price_isem
+    - hour_sin
+    - hour_cos
+    - dow_sin
+    - dow_cos
+    - is_weekend
+    - intraday_wap_rollmean_4
+    - intraday_wap_rollstd_4
+    - intraday_wap_rollmean_12
+    - intraday_wap_rollstd_12
+    - da_price_rollmean_4
+    - da_price_rollstd_4
+    - da_price_rollmean_12
+    - da_price_rollstd_12
+model:
+  name: lstm
+  data:
+    lookback_length: 24
+    forecast_horizon: 24
+    batch_size: 64
+    past_features:
+    - intraday_wap
+    - da_price
+    - wind_outturn
+    - solar_outturn
+    - demand_actual
+    - wind_error
+    - solar_error
+    - demand_error
+    known_future_features:
+    - da_price
+    - hour_sin
+    - hour_cos
+    - dow_sin
+    - dow_cos
+    - is_weekend
+  spikes:
+    use_evt: true
+    upper_threshold: 3.0
+    lower_threshold: -3.0
+  architecture:
+    encoder:
+      hidden_size: 32
+      num_layers: 1
+      dropout: 0.0
+    decoder:
+      hidden_size: 32
+      num_layers: 1
+    outputs:
+      quantiles:
+      - 0.01
+      - 0.05
+      - 0.1
+      - 0.25
+      - 0.5
+      - 0.75
+      - 0.9
+      - 0.95
+      - 0.99
+      spike_probability: true
+  training:
+    learning_rate: 0.001
+    num_epochs: 10
+    retrain_frequency: monthly
+    loss:
+      quantile: true
+      spike_bce: true
+      spike_weight: 1.0
+  runtime:
+    device: cpu
+models:
+  lstm: ${oc.dict.values:model/lstm}
+  garch: ${oc.dict.values:model/garch}
+target: level
+dataset: core_20200101_20251231
+horizon: 24

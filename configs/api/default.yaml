@@ -1,7 +1,7 @@
 # API and Market settings
 api:
-  user: ${oc.env:user}
-  password: ${oc.env:password}
+  user: 'Global'
+  password: '205225240236229161211244239242237183223195239230230229229198236239239242'
 
 settings:
   resolution: "hourly"
