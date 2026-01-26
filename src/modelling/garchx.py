@@ -463,13 +463,13 @@ def garch_from_hydra(cfg: DictConfig) -> MSGarchEVT:
     Build MSGarchEVT from Hydra config.
     """
     gcfg = GarchEVTConfig(
-        n_states=cfg.garch.regimes.n_states,
-        p=cfg.garch.variance.p,
-        q=cfg.garch.variance.q,
-        dist=cfg.garch.distribution.core,
-        use_evt=cfg.garch.spikes.use_evt,
-        upper_threshold=cfg.garch.spikes.upper_threshold,
-        lower_threshold=cfg.garch.spikes.lower_threshold,             
+        n_states=cfg.model.regimes.n_states,
+        p=cfg.model.variance.p,
+        q=cfg.model.variance.q,
+        dist=cfg.model.distribution.core,
+        use_evt=cfg.model.spikes.use_evt,
+        upper_threshold=cfg.model.spikes.upper_threshold,
+        lower_threshold=cfg.model.spikes.lower_threshold,             
     )
     return MSGarchEVT(gcfg)
 

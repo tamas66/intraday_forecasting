@@ -11,16 +11,40 @@ regimes:
 mean:
   ar_order: 1
   include_constant: true
-  exogenous: ${data.features.core_mean_exog}
+  exogenous:
+      - "da_price"
+      - "demand_actual"
+      - "demand_error"
+    
+      # - "demand_actual_lag1"
+      # - "demand_actual_lag24"
+      # - "wind_outturn"
+      # - "wind_error"
+      # - "wind_outturn_lag1"
+      # - "wind_outturn_lag24"
+      # - "solar_outturn"
+      # - "solar_error"
+      # - "solar_outturn_lag1"
+      # - "hour_sin"
+      # - "hour_cos"
+      # - "dow_sin"
+      # - "dow_cos"
+      # - "is_weekend"
 
 variance:
-  model: "garch"
+  model: garch
   p: 1
   q: 1
-  exogenous: ${data.features.variance_exog}
+  exogenous:
+    - "abs_demand_error"
+    - "abs_wind_error"
+    - "abs_solar_error"
+    - "abs_id_da_spread"
+    - "is_peak_15_18"
+    - "abs_return_lag1"
 
 distribution:
-  core: "student_t"
+  core: "t"
 
 spikes:
   use_evt: true
