@@ -215,15 +215,20 @@ def main(cfg: DictConfig) -> None:
 
     all_rows = []
 
-    for model_dir in base_dir.iterdir():
-        if not model_dir.is_dir():
+   for model_type_dir in base_dir.iterdir():
+        # 1. Format the integer into the folder name 'horizon_X'
+        horizon_folder = f"horizon_{cfg.horizon}"
+        run_dir = model_type_dir / horizon_folder
+        
+        if not run_dir.is_dir():
             continue
 
-        if (model_dir / "forecast_index.parquet").exists():
+        # 2. Check for the file inside the correctly formatted folder
+        if (run_dir / "forecast_index.parquet").exists():
             if cfg.get("verbose", True):
-                print(f"[EVAL] Evaluating {model_dir.name}")
+                print(f"[EVAL] Evaluating {model_type_dir.name}")
 
-            df_model = evaluate_run(model_dir)
+            df_model = evaluate_run(run_dir)
             all_rows.append(df_model)
 
     if not all_rows:

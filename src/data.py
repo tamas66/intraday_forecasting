@@ -55,9 +55,6 @@ def load_dataset(
     df["abs_return"] = df[base_col].diff().abs()
     df["abs_return_lag1"] = df["abs_return"].shift(1)
 
-    if target == "spread":
-        df = df.drop(columns=["da_price"], errors="ignore")
-
     if drop_na:
         df = df.dropna()
 

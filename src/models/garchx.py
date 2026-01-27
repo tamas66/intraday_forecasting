@@ -411,7 +411,7 @@ class MSGarchEVT:
             eps = z_adj * sigma
 
         # Compose y = mu + eps
-        y_samp = mu.reshape(H, 1) + eps  # (H, M)
+        y_samp = eps + mu[None, :]  # (H, M)
         return y_samp
 
     # -----------------------
