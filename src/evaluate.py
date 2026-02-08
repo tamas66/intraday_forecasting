@@ -396,9 +396,6 @@ def main(cfg: DictConfig) -> None:
     )
     region3.to_parquet(out_dir / "region_crps_by_ybin.parquet", index=False)
 
-
-
-
     # Save raw CRPS
     df_all.to_parquet(out_dir / "crps_raw.parquet", index=False)
 
@@ -413,7 +410,7 @@ def main(cfg: DictConfig) -> None:
 
         # Coverage by (model, horizon, tau)
         cov = (
-            df_q.groupby(["model", "horizon", "tau"])
+            df_q.groupby(["model", "horizon", "tau"], observed=True)
             .hit.mean()
             .reset_index()
             .rename(columns={"hit": "coverage"})
@@ -422,19 +419,37 @@ def main(cfg: DictConfig) -> None:
 
         # Pinball by (model, horizon, tau)
         pb = (
-            df_q.groupby(["model", "horizon", "tau"])
+            df_q.groupby(["model", "horizon", "tau"], observed=True)
             .pinball.mean()
             .reset_index()
         )
         pb.to_parquet(out_dir / "quantile_pinball.parquet", index=False)
     
     if all_spike:
-        df_s = pd.concat(all_spike, ignore_index=True)
-        df_s.to_parquet(out_dir / "spike_diag.parquet", index=False)
+        df_s["p_bin"] = pd.cut(
+            df_s["spike_prob"],
+            bins=np.linspace(0, 1, 11),
+            include_lowest=True
+        )
+
+        # fastparquet can't handle Interval categories -> convert
+        df_s["p_bin"] = df_s["p_bin"].astype(str)
+
+        rel = (
+            df_s.groupby(["model", "horizon", "p_bin"], observed=True)
+            .agg(
+                mean_p=("spike_prob", "mean"),
+                emp_freq=("spike_event", "mean"),
+                n=("spike_event", "size"),
+            )
+            .reset_index()
+        )
+
+        rel.to_parquet(out_dir / "spike_reliability.parquet", index=False)
 
         # Aggregate scores
         spike_scores = (
-            df_s.groupby(["model", "horizon"])
+            df_s.groupby(["model", "horizon"], observed=True)
             .agg(brier=("brier", "mean"), logloss=("logloss", "mean"), spike_rate=("spike_event", "mean"))
             .reset_index()
         )
@@ -443,7 +458,7 @@ def main(cfg: DictConfig) -> None:
         # Reliability bins (per model, horizon)
         df_s["p_bin"] = pd.cut(df_s["spike_prob"], bins=np.linspace(0, 1, 11), include_lowest=True)
         rel = (
-            df_s.groupby(["model", "horizon", "p_bin"])
+            df_s.groupby(["model", "horizon", "p_bin"], observed=True)
             .agg(mean_p=("spike_prob", "mean"), emp_freq=("spike_event", "mean"), n=("spike_event", "size"))
             .reset_index()
         )
