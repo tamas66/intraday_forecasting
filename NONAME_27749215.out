@@ -1,0 +1,67 @@
+bsub info: Parallel job without span[...] info! Assuming hosts=1 (SMP job)!
+bsub info:   Add -R "span[...]" to your job script, to avoid this message!
+Submitted train_garch array job: 27749216
+bsub info: Parallel job without span[...] info! Assuming hosts=1 (SMP job)!
+bsub info:   Add -R "span[...]" to your job script, to avoid this message!
+Submitted train_lstm array job: 27749217
+bsub info: You need to request at least 4 cores per GPU!
+bsub info: Read more about this: https://www.hpc.dtu.dk/?page_id=4976.
+bsub info:   We fixed that for you ... but you should really update
+bsub info:   your job script!
+bsub info: Parallel job without span[...] info! Assuming hosts=1 (SMP job)!
+bsub info:   Add -R "span[...]" to your job script, to avoid this message!
+Job <27749218> is submitted to queue <gpuv100>.
+Submitted eval_all (depends on train_garch and train_lstm).
+
+------------------------------------------------------------
+Sender: LSF System <lsfadmin@hpc.dtu.dk>
+Subject: Job 27749215: <NONAME> in cluster <dcc> Done
+
+Job <NONAME> was submitted from host <hpclogin1> by user <s242966> in cluster <dcc> at Sun Feb  8 22:20:32 2026
+Job was executed on host(s) <n-62-11-66>, in queue <hpc>, as user <s242966> in cluster <dcc> at Sun Feb  8 22:20:32 2026
+</zhome/2c/d/213910> was used as the home directory.
+</zhome/2c/d/213910/intraday_forecasting> was used as the working directory.
+Started at Sun Feb  8 22:20:32 2026
+Terminated at Sun Feb  8 22:20:33 2026
+Results reported at Sun Feb  8 22:20:33 2026
+
+Your job looked like:
+
+------------------------------------------------------------
+# LSBATCH: User input
+#!/bin/bash
+set -euo pipefail
+
+mkdir -p logs
+
+# Submit GARCH and LSTM arrays
+GARCH_JOB=$(bsub < jobs/train_garch_array.sh | awk -F'[<>]' '{print $2}')
+echo "Submitted train_garch array job: ${GARCH_JOB}"
+
+LSTM_JOB=$(bsub < jobs/train_lstm_array.sh | awk -F'[<>]' '{print $2}')
+echo "Submitted train_lstm array job: ${LSTM_JOB}"
+
+# Submit evaluation array after both complete
+# Dependency uses job names (train_garch, train_lstm) which match #BSUB -J names above.
+bsub -w "done(train_garch) && done(train_lstm)" < jobs/evaluate_array.sh
+echo "Submitted eval_all (depends on train_garch and train_lstm)."
+
+------------------------------------------------------------
+
+Successfully completed.
+
+Resource usage summary:
+
+    CPU time :                                   0.72 sec.
+    Max Memory :                                 -
+    Average Memory :                             -
+    Total Requested Memory :                     1024.00 MB
+    Delta Memory :                               -
+    Max Swap :                                   -
+    Max Processes :                              -
+    Max Threads :                                -
+    Run time :                                   50 sec.
+    Turnaround time :                            1 sec.
+
+The output (if any) is above this job summary.
+

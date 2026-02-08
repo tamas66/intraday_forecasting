@@ -311,26 +311,41 @@ def main(cfg: DictConfig) -> None:
     all_rows, all_qdiag, all_cross, all_spike = [], [], [], []
 
     for model_type_dir in base_dir.iterdir():
-        # 1. Format the integer into the folder name 'horizon_X'
-        horizon_folder = f"horizon_{cfg.horizon}"
-        run_dir = model_type_dir / horizon_folder
-        
-        if not run_dir.is_dir():
+        if not model_type_dir.is_dir():
             continue
 
-        # 2. Check for the file inside the correctly formatted folder
-        if (run_dir / "forecast_index.parquet").exists():
-            if cfg.get("verbose", True):
-                print(f"[EVAL] Evaluating {model_type_dir.name}")
+        # model_type_dir = models/{target}/{model}
+        for run_name_dir in model_type_dir.iterdir():
+            if not run_name_dir.is_dir():
+                continue
 
-                df_row, df_qdiag, df_cross, df_spike = evaluate_run(run_dir)
-                all_rows.append(df_row)
-                if not df_qdiag.empty:
-                    all_qdiag.append(df_qdiag)
-                if not df_cross.empty:
-                    all_cross.append(df_cross)
-                if not df_spike.empty:
-                    all_spike.append(df_spike)
+            # run_name_dir = models/{target}/{model}/{run_name}
+            run_dir = run_name_dir / f"horizon_{cfg.horizon}"
+            if not run_dir.is_dir():
+                continue
+
+            index_path = run_dir / "forecast_index.parquet"
+            if not index_path.exists():
+                continue
+
+            if cfg.get("verbose", True):
+                print(f"[EVAL] Evaluating model={model_type_dir.name}, run_name={run_name_dir.name}")
+
+            df_row, df_qdiag, df_cross, df_spike = evaluate_run(run_dir)
+
+            # Tag outputs for grouping
+            for d in (df_row, df_qdiag, df_cross, df_spike):
+                if d is not None and not d.empty:
+                    d["model_type"] = model_type_dir.name
+                    d["run_name"] = run_name_dir.name
+
+        all_rows.append(df_row)
+        if not df_qdiag.empty:
+            all_qdiag.append(df_qdiag)
+        if not df_cross.empty:
+            all_cross.append(df_cross)
+        if not df_spike.empty:
+            all_spike.append(df_spike)
 
     if not all_rows:
         raise RuntimeError("No forecast_index.parquet found")
