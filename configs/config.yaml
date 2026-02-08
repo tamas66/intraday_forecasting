@@ -2,6 +2,7 @@ defaults:
   - api: default
   - data: default
   - model: lstm
+  - run_name: null
   - override hydra/job_logging: disabled
   - override hydra/hydra_logging: disabled
   - _self_
@@ -20,7 +21,7 @@ hydra:
     chdir: false
 
 
-
+run_name: null
 target: level        # or spread
 dataset: core_20200101_20251231
 horizon: 24          # forecast horizon H

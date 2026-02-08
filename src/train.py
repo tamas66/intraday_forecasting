@@ -29,9 +29,13 @@ def _get_model_run_dir(cfg: DictConfig, target: str, model_name: str) -> Path:
     Required by you:
       cfg.data.paths.models_dir/{target}/{model_name}
     """
-    root = Path(cfg.data.paths.models_dir) / target / model_name / f"horizon_{cfg.horizon}/"
-
+    run_name = cfg.get("run_name", None)
+    if run_name:
+        root = Path(cfg.data.paths.models_dir) / target / model_name / str(run_name) / f"horizon_{cfg.horizon}/"
+    else:
+        root = Path(cfg.data.paths.models_dir) / target / model_name / f"horizon_{cfg.horizon}/"
     return _ensure_dir(root)
+
 
 
 def _get_split_dates(cfg: DictConfig) -> Tuple[pd.Timestamp, pd.Timestamp]:

@@ -344,6 +344,15 @@ def main(cfg: DictConfig) -> None:
         lambda s: pd.qcut(s, q=10, duplicates="drop")
     )
 
+    out_dir = (
+        Path(cfg.paths.outputs_dir)
+        / target
+        / f"horizon_{cfg.horizon}"
+        / (cfg.run_name if cfg.run_name is not None else "default")
+    )
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+
     region = (
         df_all.groupby(["model", "horizon", "hour"])
         .crps.mean()
@@ -369,12 +378,8 @@ def main(cfg: DictConfig) -> None:
     region3.to_parquet(out_dir / "region_crps_by_ybin.parquet", index=False)
 
 
-    out_dir = (
-        Path(cfg.paths.outputs_dir)
-        / target
-        / f"horizon_{cfg.horizon}"
-    )
-    out_dir.mkdir(parents=True, exist_ok=True)
+
+
     # Save raw CRPS
     df_all.to_parquet(out_dir / "crps_raw.parquet", index=False)
 
