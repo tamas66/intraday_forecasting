@@ -362,7 +362,6 @@ def main(cfg: DictConfig) -> None:
     # fastparquet can't handle Interval categories well -> convert to string
     df_all["y_bin"] = df_all["y_bin"].astype(str)
 
-
     out_dir = (
         Path(cfg.paths.outputs_dir)
         / target
@@ -426,6 +425,7 @@ def main(cfg: DictConfig) -> None:
         pb.to_parquet(out_dir / "quantile_pinball.parquet", index=False)
     
     if all_spike:
+        df_s = pd.concat(all_spike, ignore_index=True)
         df_s["p_bin"] = pd.cut(
             df_s["spike_prob"],
             bins=np.linspace(0, 1, 11),
