@@ -311,17 +311,17 @@ def main(cfg: DictConfig) -> None:
     all_rows, all_qdiag, all_cross, all_spike = [], [], [], []
 
     for model_type_dir in base_dir.iterdir():
-            # 1. Format the integer into the folder name 'horizon_X'
-            horizon_folder = f"horizon_{cfg.horizon}"
-            run_dir = model_type_dir / horizon_folder
-            
-            if not run_dir.is_dir():
-                continue
+        # 1. Format the integer into the folder name 'horizon_X'
+        horizon_folder = f"horizon_{cfg.horizon}"
+        run_dir = model_type_dir / horizon_folder
+        
+        if not run_dir.is_dir():
+            continue
 
-            # 2. Check for the file inside the correctly formatted folder
-            if (run_dir / "forecast_index.parquet").exists():
-                if cfg.get("verbose", True):
-                    print(f"[EVAL] Evaluating {model_type_dir.name}")
+        # 2. Check for the file inside the correctly formatted folder
+        if (run_dir / "forecast_index.parquet").exists():
+            if cfg.get("verbose", True):
+                print(f"[EVAL] Evaluating {model_type_dir.name}")
 
                 df_row, df_qdiag, df_cross, df_spike = evaluate_run(run_dir)
                 all_rows.append(df_row)
