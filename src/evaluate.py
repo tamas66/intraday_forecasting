@@ -359,6 +359,10 @@ def main(cfg: DictConfig) -> None:
         lambda s: pd.qcut(s, q=10, duplicates="drop")
     )
 
+    # fastparquet can't handle Interval categories well -> convert to string
+    df_all["y_bin"] = df_all["y_bin"].astype(str)
+
+
     out_dir = (
         Path(cfg.paths.outputs_dir)
         / target
@@ -369,7 +373,7 @@ def main(cfg: DictConfig) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     region = (
-        df_all.groupby(["model", "horizon", "hour"])
+        df_all.groupby(["model", "horizon", "hour"], observed=True)
         .crps.mean()
         .reset_index()
         .rename(columns={"crps": "crps_by_hour"})
@@ -377,7 +381,7 @@ def main(cfg: DictConfig) -> None:
     region.to_parquet(out_dir / "region_crps_by_hour.parquet", index=False)
 
     region2 = (
-        df_all.groupby(["model", "horizon", "month"])
+        df_all.groupby(["model", "horizon", "month"], observed=True)
         .crps.mean()
         .reset_index()
         .rename(columns={"crps": "crps_by_month"})
@@ -385,7 +389,7 @@ def main(cfg: DictConfig) -> None:
     region2.to_parquet(out_dir / "region_crps_by_month.parquet", index=False)
 
     region3 = (
-        df_all.groupby(["model", "horizon", "y_bin"])
+        df_all.groupby(["model", "horizon", "y_bin"], observed=True)
         .crps.mean()
         .reset_index()
         .rename(columns={"crps": "crps_by_ybin"})
