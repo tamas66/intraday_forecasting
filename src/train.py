@@ -7,6 +7,7 @@ from typing import Dict, Literal, Optional, Tuple, List
 import numpy as np
 import pandas as pd
 import torch
+import time
 from omegaconf import DictConfig, OmegaConf
 
 from data import load_dataset, Seq2SeqDataset
@@ -274,6 +275,7 @@ def run_rolling_training(
     OmegaConf.save(cfg, run_dir / "config_snapshot.yaml")
 
     rows: List[Dict] = []
+    refit_rows: List[Dict] = []
     dist_dir = _ensure_dir(run_dir / "distributions")
 
     if verbose:
@@ -315,12 +317,25 @@ def run_rolling_training(
             X_mean = df_win[mean_cols].values if mean_cols else None
 
             fitted = False
+            t0 = time.perf_counter()
             try:
                 garch.fit(y=y_train, X_mean=X_mean)
                 fitted = True
             except Exception as e:
                 print(f"[GARCH] Skipping refit at {refit_date}: {e}")
-
+            train_time = time.perf_counter() - t0
+            refit_rows.append(
+                {
+                    "model": "garch",
+                    "target": target,
+                    "refit_date": refit_date,
+                    "train_time_sec": train_time,
+                    "window_days": window_days,
+                    "horizon": horizon,
+                    "n_origins": int(len(seg_origins)),
+                    "status": "fitted" if fitted else "failed",
+                }
+            )
             if not fitted:
                 continue
 
@@ -332,11 +347,12 @@ def run_rolling_training(
                     continue
 
                 X_future = fut[mean_cols].values if mean_cols else None
+                t1 = time.perf_counter()
                 if fitted:
                     samples = garch.forecast_samples(X_future=X_future, horizon=horizon, n_sim=M)
                 else:
                     continue
-
+                forecast_time = time.perf_counter() - t1
                 y_true = fut["y"].values
 
                 dist_path = dist_dir / f"samples_{origin.strftime('%Y%m%d%H')}.npy"
@@ -354,6 +370,8 @@ def run_rolling_training(
                             "dist_path": str(dist_path),
                             "dist_kind": "samples",
                             "meta_refit": refit_date,
+                            "train_time_sec": float(train_time),
+                            "pred_time_sec": float(forecast_time),
                         }
                     )
 
@@ -362,19 +380,33 @@ def run_rolling_training(
 
             if (lstm_model is None) or (not warm_start):
                 lstm_model = lstm_from_hydra(cfg)  # should read cfg.model internally
-
+            t0 = time.perf_counter()
             lstm_model = _train_lstm_one_window(model_cfg=model_cfg, model=lstm_model, train_df=df_win)
-
+            train_time = time.perf_counter() - t0
+            refit_rows.append(
+                {
+                    "model": "lstm",
+                    "target": target,
+                    "refit_date": refit_date,
+                    "train_time_sec": train_time,
+                    "window_days": window_days,
+                    "horizon": horizon,
+                    "n_origins": int(len(seg_origins)),
+                    "status": "ok",
+                    "warm_start": bool(warm_start),
+                }
+            )
             taus = list(model_cfg.architecture.outputs.quantiles)
 
             for origin in seg_origins:
                 fut = df.loc[origin:].iloc[:horizon]
                 if len(fut) < horizon:
                     continue
-
+                t1 = time.perf_counter()
                 q_pred, spike_prob = _predict_lstm_one_origin(
                     model_cfg=model_cfg, model=lstm_model, df=df, origin=origin
                 )
+                pred_time = time.perf_counter() - t1
                 y_true = fut["y"].values
 
                 dist_path = dist_dir / f"quantiles_{origin.strftime('%Y%m%d%H')}.npz"
@@ -397,6 +429,8 @@ def run_rolling_training(
                             "dist_path": str(dist_path),
                             "dist_kind": "quantiles",
                             "meta_refit": refit_date,
+                            "train_time_sec": float(train_time),
+                            "pred_time_sec": float(pred_time),
                         }
                     )
         else:
@@ -405,7 +439,8 @@ def run_rolling_training(
     out_df = pd.DataFrame(rows)
     out_path = run_dir / "forecast_index.parquet"
     out_df.to_parquet(out_path, index=False)
-
+    if refit_rows:
+        pd.DataFrame(refit_rows).to_parquet(run_dir / "refit_times.parquet", index=False)
     if verbose:
         print(f"[{model_name}] wrote {len(out_df)} rows -> {out_path}")
 

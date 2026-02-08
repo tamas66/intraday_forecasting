@@ -1,11 +1,10 @@
 name: "lstm"
 
 data:
-  lookback_length: 24        # L, Hydra-controlled
-  forecast_horizon: ${horizon}  # H, injected globally
+  lookback_length: 168
+  forecast_horizon: ${horizon}
   batch_size: 64
 
-  # Feature groups (resolved in data loader)
   past_features:
     - intraday_wap
     - da_price
@@ -17,7 +16,7 @@ data:
     - demand_error
 
   known_future_features:
-    - da_price        # only when available (cutoff logic)
+    - da_price
     - hour_sin
     - hour_cos
     - dow_sin
@@ -25,32 +24,31 @@ data:
     - is_weekend
 
 spikes:
-  use_evt: true
+  # NOTE: This is used by Seq2SeqDataset spike labeling + evaluation thresholds
   upper_threshold: 3.0
   lower_threshold: -3.0
 
 architecture:
   encoder:
-    hidden_size: 32
+    hidden_size: 64
     num_layers: 1
     dropout: 0.0
 
-  decoder:
-    hidden_size: 32
-    num_layers: 1
-
   outputs:
     quantiles: [0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99]
-    spike_probability: true   # sigmoid head
+    spike_probability: true
 
 training:
-  learning_rate: 0.001
-  num_epochs: 10
-  retrain_frequency: "monthly"
+  learning_rate: 0.0001
+  num_epochs: 100
+
+  # Loss config is partly documentary right now; spike_weight is used in train.py
   loss:
-    quantile: true
-    spike_bce: true
     spike_weight: 1.0
 
+  # This is used (keeps weights between monthly refits in the same run)
+  warm_start: true
+
 runtime:
-  device: "cpu"
+  # torch.device expects "cuda" or "cpu"
+  device: "cuda"

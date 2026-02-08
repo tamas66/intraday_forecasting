@@ -6,9 +6,25 @@ from typing import Dict, Literal
 
 import numpy as np
 import pandas as pd
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 import hydra
 from scipy.stats import norm
+from scipy.special import expit
+
+# ======================================================
+# Helper functions for evaluation
+# ======================================================
+
+def pinball_loss(q: float, tau: float, y: float) -> float:
+    e = y - q
+    return float(max(tau * e, (tau - 1) * e))
+
+def safe_logloss(p: float, y: int, eps: float = 1e-12) -> float:
+    p = float(np.clip(p, eps, 1 - eps))
+    return float(-(y * np.log(p) + (1 - y) * np.log(1 - p)))
+
+def spike_event(y: float, upper: float, lower: float) -> int:
+    return int((y >= upper) or (y <= lower))
 
 
 # ======================================================
@@ -119,19 +135,40 @@ def quantile_residual(pit: float) -> float:
 # Main evaluation
 # ======================================================
 
-def evaluate_run(run_dir: Path, verbose: bool = True) -> pd.DataFrame:
+def evaluate_run(run_dir: Path, verbose: bool = True):
     """
-    Evaluate a single model run directory.
+    Returns:
+      df_row: row-level table with CRPS/PIT/qres (+ timing columns if present)
+      df_qdiag: long quantile diagnostics (only for quantile models)
+      df_spike: spike diagnostics (only for quantile models with spike_prob)
     """
+
     index_path = run_dir / "forecast_index.parquet"
     if not index_path.exists():
         raise FileNotFoundError(index_path)
+
+    cfg_path = run_dir / "config_snapshot.yaml"
+    upper_thr = None
+    lower_thr = None
+    if cfg_path.exists():
+        cfg = OmegaConf.load(cfg_path)
+        # LSTM spikes thresholds live in cfg.model.spikes.*
+        try:
+            upper_thr = float(cfg.model.spikes.upper_threshold)
+            lower_thr = float(cfg.model.spikes.lower_threshold)
+        except Exception:
+            upper_thr, lower_thr = None, None
+
 
     df = pd.read_parquet(index_path)
 
     crps_values = []
     pit_values = []
     qres_values = []
+    qdiag_rows = []
+    spike_rows = []
+    crossing_rows = []
+
 
     for _, row in df.iterrows():
         y = row["y_true"]
@@ -145,8 +182,62 @@ def evaluate_run(run_dir: Path, verbose: bool = True) -> pd.DataFrame:
 
         elif row["dist_kind"] == "quantiles":
             d = load_lstm_distribution(dist_path, h)
-            crps = crps_from_quantiles(d["quantiles"], d["taus"], y)
-            pit = pit_from_quantiles(d["quantiles"], d["taus"], y)
+            qs = np.asarray(d["quantiles"], dtype=float)   # (Q,)
+            taus = np.asarray(d["taus"], dtype=float)      # (Q,)
+            sp = float(d["spike_prob"])                    # scalar
+
+            crps = crps_from_quantiles(qs, taus, y)
+            pit = pit_from_quantiles(qs, taus, y)
+
+            # --- quantile diagnostics (per tau) ---
+            # Quantile crossing check requires monotone qs in taus order
+            is_monotone = int(np.all(np.diff(qs) >= 0))
+            crossing_rows.append(
+                {
+                    "model": row["model"],
+                    "target": row.get("target", None),
+                    "origin_time": row["origin_time"],
+                    "target_time": row["target_time"],
+                    "horizon": int(row["horizon"]),
+                    "is_monotone": is_monotone,
+                    "n_crossings": int(np.sum(np.diff(qs) < 0)),
+                }
+            )
+
+            for qv, tau in zip(qs, taus):
+                qdiag_rows.append(
+                    {
+                        "model": row["model"],
+                        "target": row.get("target", None),
+                        "origin_time": row["origin_time"],
+                        "target_time": row["target_time"],
+                        "horizon": int(row["horizon"]),
+                        "tau": float(tau),
+                        "q_pred": float(qv),
+                        "y_true": float(y),
+                        "hit": int(y <= qv),                 # coverage indicator
+                        "pinball": pinball_loss(qv, float(tau), float(y)),
+                        "abs_err": float(abs(y - qv)),
+                    }
+                )
+
+            # --- spike diagnostics (needs thresholds) ---
+            if (upper_thr is not None) and (lower_thr is not None) and np.isfinite(sp):
+                sev = spike_event(y=float(y), upper=upper_thr, lower=lower_thr)
+                spike_rows.append(
+                    {
+                        "model": row["model"],
+                        "target": row.get("target", None),
+                        "origin_time": row["origin_time"],
+                        "target_time": row["target_time"],
+                        "horizon": int(row["horizon"]),
+                        "spike_prob": float(sp),
+                        "spike_event": int(sev),
+                        "brier": float((sp - sev) ** 2),
+                        "logloss": safe_logloss(sp, sev),
+                    }
+                )
+
 
         else:
             raise ValueError(f"Unknown dist_kind: {row['dist_kind']}")
@@ -159,7 +250,11 @@ def evaluate_run(run_dir: Path, verbose: bool = True) -> pd.DataFrame:
     df["pit"] = pit_values
     df["qres"] = qres_values
 
-    return df
+    df_qdiag = pd.DataFrame(qdiag_rows) if qdiag_rows else pd.DataFrame()
+    df_cross = pd.DataFrame(crossing_rows) if crossing_rows else pd.DataFrame()
+    df_spike = pd.DataFrame(spike_rows) if spike_rows else pd.DataFrame()
+
+    return df, df_qdiag, df_cross, df_spike
 
 
 # ======================================================
@@ -213,7 +308,7 @@ def main(cfg: DictConfig) -> None:
 
     base_dir = Path(cfg.data.paths.models_dir) / target
 
-    all_rows = []
+    all_rows, all_qdiag, all_cross, all_spike = [], [], [], []
 
     for model_type_dir in base_dir.iterdir():
             # 1. Format the integer into the folder name 'horizon_X'
@@ -228,13 +323,51 @@ def main(cfg: DictConfig) -> None:
                 if cfg.get("verbose", True):
                     print(f"[EVAL] Evaluating {model_type_dir.name}")
 
-                df_model = evaluate_run(run_dir)
-                all_rows.append(df_model)
+                df_row, df_qdiag, df_cross, df_spike = evaluate_run(run_dir)
+                all_rows.append(df_row)
+                if not df_qdiag.empty:
+                    all_qdiag.append(df_qdiag)
+                if not df_cross.empty:
+                    all_cross.append(df_cross)
+                if not df_spike.empty:
+                    all_spike.append(df_spike)
 
     if not all_rows:
         raise RuntimeError("No forecast_index.parquet found")
 
     df_all = pd.concat(all_rows, ignore_index=True)
+    df_all["hour"] = pd.to_datetime(df_all.target_time).dt.hour
+    df_all["month"] = pd.to_datetime(df_all.target_time).dt.month
+
+    # y-level bins (per model) for "regions"
+    df_all["y_bin"] = df_all.groupby("model")["y_true"].transform(
+        lambda s: pd.qcut(s, q=10, duplicates="drop")
+    )
+
+    region = (
+        df_all.groupby(["model", "horizon", "hour"])
+        .crps.mean()
+        .reset_index()
+        .rename(columns={"crps": "crps_by_hour"})
+    )
+    region.to_parquet(out_dir / "region_crps_by_hour.parquet", index=False)
+
+    region2 = (
+        df_all.groupby(["model", "horizon", "month"])
+        .crps.mean()
+        .reset_index()
+        .rename(columns={"crps": "crps_by_month"})
+    )
+    region2.to_parquet(out_dir / "region_crps_by_month.parquet", index=False)
+
+    region3 = (
+        df_all.groupby(["model", "horizon", "y_bin"])
+        .crps.mean()
+        .reset_index()
+        .rename(columns={"crps": "crps_by_ybin"})
+    )
+    region3.to_parquet(out_dir / "region_crps_by_ybin.parquet", index=False)
+
 
     out_dir = (
         Path(cfg.paths.outputs_dir)
@@ -249,6 +382,49 @@ def main(cfg: DictConfig) -> None:
     aggs = aggregate_crps(df_all)
     for name, df_agg in aggs.items():
         df_agg.to_parquet(out_dir / f"crps_{name}.parquet", index=False)
+
+    if all_qdiag:
+        df_q = pd.concat(all_qdiag, ignore_index=True)
+        df_q.to_parquet(out_dir / "quantile_diag.parquet", index=False)
+
+        # Coverage by (model, horizon, tau)
+        cov = (
+            df_q.groupby(["model", "horizon", "tau"])
+            .hit.mean()
+            .reset_index()
+            .rename(columns={"hit": "coverage"})
+        )
+        cov.to_parquet(out_dir / "quantile_coverage.parquet", index=False)
+
+        # Pinball by (model, horizon, tau)
+        pb = (
+            df_q.groupby(["model", "horizon", "tau"])
+            .pinball.mean()
+            .reset_index()
+        )
+        pb.to_parquet(out_dir / "quantile_pinball.parquet", index=False)
+    
+    if all_spike:
+        df_s = pd.concat(all_spike, ignore_index=True)
+        df_s.to_parquet(out_dir / "spike_diag.parquet", index=False)
+
+        # Aggregate scores
+        spike_scores = (
+            df_s.groupby(["model", "horizon"])
+            .agg(brier=("brier", "mean"), logloss=("logloss", "mean"), spike_rate=("spike_event", "mean"))
+            .reset_index()
+        )
+        spike_scores.to_parquet(out_dir / "spike_scores.parquet", index=False)
+
+        # Reliability bins (per model, horizon)
+        df_s["p_bin"] = pd.cut(df_s["spike_prob"], bins=np.linspace(0, 1, 11), include_lowest=True)
+        rel = (
+            df_s.groupby(["model", "horizon", "p_bin"])
+            .agg(mean_p=("spike_prob", "mean"), emp_freq=("spike_event", "mean"), n=("spike_event", "size"))
+            .reset_index()
+        )
+        rel.to_parquet(out_dir / "spike_reliability.parquet", index=False)
+
 
     print(f"[EVAL] Results written to {out_dir}")
 
