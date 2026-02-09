@@ -209,7 +209,6 @@ __marimo__/
 # Custom ignores
 /data/
 thesis_documents/
-outputs/
 notebooks/
 prompt.txt
 *.png
