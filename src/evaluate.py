@@ -462,6 +462,7 @@ def main(cfg: DictConfig) -> None:
             .agg(mean_p=("spike_prob", "mean"), emp_freq=("spike_event", "mean"), n=("spike_event", "size"))
             .reset_index()
         )
+        rel["p_bin"] = rel["p_bin"].astype(str)
         rel.to_parquet(out_dir / "spike_reliability.parquet", index=False)
 
 
