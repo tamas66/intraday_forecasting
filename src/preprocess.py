@@ -276,6 +276,14 @@ def load_and_save_working_subset(
 
     df = df[cols]
 
+    # Drop columns with more than 10% missing values, and log the dropped columns
+    missing_threshold = 0.1
+    missing_ratios = df.isna().mean()
+    cols_to_drop = missing_ratios[missing_ratios > missing_threshold].index.tolist()
+    if cols_to_drop:
+        logger.warning(f"Dropping columns with >{missing_threshold*100}% missing values: {cols_to_drop}")
+        df = df.drop(columns=cols_to_drop)
+
     # 3. Save final subset
     out_dir = Path(cfg.data.paths.final_data_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -307,7 +315,6 @@ def main(cfg: DictConfig) -> None:
         cfg,
         start_date="2020-01-01",
         end_date="2025-12-31",
-        features="core",
         force_refresh=force
     )
 

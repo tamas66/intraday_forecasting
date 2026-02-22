@@ -20,8 +20,8 @@ hydra:
   job:
     chdir: false
 
-
+force_refresh: False
 run_name: null
 target: level        # or spread
-dataset: core_20200101_20251231
+dataset: all_20200101_20251231
 horizon: 24          # forecast horizon H

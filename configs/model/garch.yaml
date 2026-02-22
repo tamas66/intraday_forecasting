@@ -12,36 +12,25 @@ mean:
   ar_order: 1
   include_constant: true
   exogenous:
-      - "da_price"
-      - "demand_actual"
-      - "demand_error"
-    
-      # - "demand_actual_lag1"
-      # - "demand_actual_lag24"
-      # - "wind_outturn"
-      # - "wind_error"
-      # - "wind_outturn_lag1"
-      # - "wind_outturn_lag24"
-      # - "solar_outturn"
-      # - "solar_error"
-      # - "solar_outturn_lag1"
-      # - "hour_sin"
-      # - "hour_cos"
-      # - "dow_sin"
-      # - "dow_cos"
-      # - "is_weekend"
+    - "da_price"              # Baseline anchor (Merit Order proxy)
+    - "demand_da_forecast"    # Anticipated load
+    - "wind_forecast_ng"      # Paper: Major driver of negative price risk
+    - "solar_forecast_ng"     # Paper: Diurnal merit-order shifter
+    - "interconnector_total"  # Paper: 5th most important feature (Net Position)
+    - "price_france"          # Border proxy for marginal fuel costs
+
 
 variance:
   model: garch
   p: 1
   q: 1
   exogenous:
-    - "abs_demand_error"
-    - "abs_wind_error"
-    - "abs_solar_error"
-    - "abs_id_da_spread"
-    - "is_peak_15_18"
-    - "abs_return_lag1"
+    - "abs_id_da_spread"      # Volatility clustering (Standard GARCH)
+    - "wind_outturn_delta_4"  # Paper: Generation ramps increase volatility
+    - "solar_outturn_delta_4" # Paper: Rapid solar ramps create instability
+    - "abs_wind_error"        # Weather surprise factor
+    - "abs_demand_error"      # Load surprise factor
+    - "gen_total_conventional" # Paper: High conventional gen = steep merit order curve
 
 distribution:
   core: "t"

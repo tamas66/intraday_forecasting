@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
-from typing import List, Tuple, Optional
-
+import pywt
+from typing import List
 import hydra
 from omegaconf import DictConfig
 import holidays
@@ -143,6 +143,122 @@ def add_rolling_features(
             df[f"{col}_rollstd_{w}"] = df[col].rolling(w, min_periods=w).std()
     return df
 
+# ======================
+# DECOMPOSITION FEATURES (OPTIONAL)
+# ======================
+
+def add_wavelet_targets(
+    df: pd.DataFrame,
+    target_col: str,
+    window: int = 336,
+    wavelet: str = "db4",
+    level: int = 3,
+) -> pd.DataFrame:
+    """
+    Rolling causal wavelet decomposition.
+    Extracts wavelet components at time t using only past data.
+    """
+
+    series = df[target_col].values
+
+    wav_trend = np.full(len(series), np.nan)
+    wav_d1 = np.full(len(series), np.nan)
+    wav_d2 = np.full(len(series), np.nan)
+    wav_d3 = np.full(len(series), np.nan)
+    wav_resid = np.full(len(series), np.nan)
+
+    for t in range(window, len(series)):
+        window_slice = series[t - window:t]
+
+        if np.isnan(window_slice).any():
+            continue
+
+        coeffs = pywt.wavedec(window_slice, wavelet, level=level)
+
+        # coeffs: [A3, D3, D2, D1]
+        A3, D3, D2, D1 = coeffs
+
+        # Reconstruct components
+        A3_rec = pywt.waverec([A3] + [None]*level, wavelet)
+        D3_rec = pywt.waverec([None, D3] + [None]*(level-1), wavelet)
+        D2_rec = pywt.waverec([None, None, D2] + [None]*(level-2), wavelet)
+        D1_rec = pywt.waverec([None, None, None, D1], wavelet)
+
+        # Trim padding
+        A3_rec = A3_rec[-window:]
+        D3_rec = D3_rec[-window:]
+        D2_rec = D2_rec[-window:]
+        D1_rec = D1_rec[-window:]
+
+        reconstructed = A3_rec + D3_rec + D2_rec + D1_rec
+        resid = window_slice - reconstructed
+
+        wav_trend[t] = A3_rec[-1]
+        wav_d3[t] = D3_rec[-1]
+        wav_d2[t] = D2_rec[-1]
+        wav_d1[t] = D1_rec[-1]
+        wav_resid[t] = resid[-1]
+
+    df["wav_trend"] = wav_trend
+    df["wav_detail_3"] = wav_d3
+    df["wav_detail_2"] = wav_d2
+    df["wav_detail_1"] = wav_d1
+    df["wav_residual"] = wav_resid
+
+    return df
+
+def add_jump_targets(
+    df: pd.DataFrame,
+    target_col: str,
+    window: int = 336,
+    wavelet: str = "db4",
+    level: int = 1,
+    threshold_k: float = 5.0,
+) -> pd.DataFrame:
+    """
+    Rolling wavelet-based jump extraction.
+    Conservative threshold (k=5).
+    """
+
+    series = df[target_col].values
+
+    jump_flag = np.zeros(len(series))
+    jump_component = np.full(len(series), np.nan)
+    smooth_price = np.full(len(series), np.nan)
+
+    for t in range(window, len(series)):
+        window_slice = series[t - window:t]
+
+        if np.isnan(window_slice).any():
+            continue
+
+        coeffs = pywt.wavedec(window_slice, wavelet, level=level)
+
+        # Highest frequency detail
+        D1 = coeffs[-1]
+
+        # Robust threshold using MAD
+        mad = np.median(np.abs(D1 - np.median(D1)))
+        tau = threshold_k * mad
+
+        jump_mask = np.abs(D1) > tau
+
+        # Reconstruct jump-only signal
+        D1_jump = np.zeros_like(D1)
+        D1_jump[jump_mask] = D1[jump_mask]
+
+        jump_signal = pywt.waverec([None, D1_jump], wavelet)
+        jump_signal = jump_signal[-window:]
+
+        jump_component[t] = jump_signal[-1]
+        smooth_price[t] = series[t] - jump_signal[-1]
+        jump_flag[t] = 1 if abs(jump_signal[-1]) > 0 else 0
+
+    df["jump_flag"] = jump_flag
+    df["jump_component"] = jump_component
+    df["smooth_price"] = smooth_price
+
+    return df
 
 # ======================
 # LAG FEATURES (OPTIONAL)
@@ -199,12 +315,12 @@ def build_dataframes_from_api_responses(
     # ----------------------
     intraday_prices = pd.DataFrame(index=df_intraday.index)
     intraday_prices["intraday_wap"] = df_intraday["HH WAP"]
-    # intraday_prices["intraday_open"] = df_intraday["OPENING TRADED PRICE"]
-    # intraday_prices["intraday_close"] = df_intraday["CLOSING TRADED PRICE"]
-    # intraday_prices["intraday_high"] = df_intraday["HIGH TRADED PRICE"]
-    # intraday_prices["intraday_low"] = df_intraday["LOW TRADED PRICE"]
-    # intraday_prices["ssp"] = df_intraday["SSP"]
-    # intraday_prices["sbp"] = df_intraday["SBP"]
+    intraday_prices["intraday_open"] = df_intraday["OPENING TRADED PRICE"]
+    intraday_prices["intraday_close"] = df_intraday["CLOSING TRADED PRICE"]
+    intraday_prices["intraday_high"] = df_intraday["HIGH TRADED PRICE"]
+    intraday_prices["intraday_low"] = df_intraday["LOW TRADED PRICE"]
+    intraday_prices["ssp"] = df_intraday["SSP"]
+    intraday_prices["sbp"] = df_intraday["SBP"]
     intraday_prices = intraday_prices.sort_index().astype(float)
 
     # ----------------------
@@ -232,7 +348,7 @@ def build_dataframes_from_api_responses(
     wind["wind_forecast_ng"] = df_wind["National Grid Forecast"]
     # wind["wind_forecast_enappsys_adj"] = df_wind["EnAppSys Forecast Trend-Adjusted"]
     # wind["wind_forecast_enappsys_raw"] = df_wind["EnAppSys Forecast Unadjusted"]
-    # wind["wind_capacity"] = df_wind["Capacity"]
+    wind["wind_capacity"] = df_wind["Capacity"]
     # wind["wind_balancing"] = df_wind["Total Accepted Balancing Level"]
     wind["wind_error"] = wind["wind_outturn"] - wind["wind_forecast_ng"]
     # wind["wind_error_enappsys"] = wind["wind_outturn"] - wind["wind_forecast_enappsys_adj"]
@@ -248,7 +364,7 @@ def build_dataframes_from_api_responses(
     # solar["solar_forecast_enappsys_adj"] = df_solar["Trend Adjusted Solar Forecast (EnAppSys)"]
     # solar["solar_p10"] = df_solar["Solar P10 Forecast (EnAppSys)"]
     # solar["solar_p90"] = df_solar["Solar P90 Forecast (EnAppSys)"]
-    # solar["solar_capacity"] = df_solar["Capacity"]
+    solar["solar_capacity"] = df_solar["Capacity"]
     solar["solar_error"] = solar["solar_outturn"] - solar["solar_forecast_ng"]
     # solar["solar_error_enappsys"] = solar["solar_outturn"] - solar["solar_forecast_enappsys_adj"]
     solar = solar.sort_index().astype(float)
@@ -298,7 +414,6 @@ def build_dataframes_from_api_responses(
 
     return da_prices, intraday_prices, demand, wind, solar, flows, generation
 
-
 def build_feature_dataframe(
     da_prices: pd.DataFrame,
     intraday_prices: pd.DataFrame,
@@ -311,36 +426,57 @@ def build_feature_dataframe(
     tz: str,
     index_name: str,
 ) -> pd.DataFrame:
-    """Merge domain DataFrames and add engineered features."""
+    """
+    Merge domain DataFrames handling the Hourly (DA) vs Half-Hourly (ID) frequency mismatch.
+    """
+
+    # 1. Identify the 'Master Index' (the highest frequency)
+    # Usually intraday_prices is 30min or 15min.
+    master_index = intraday_prices.index
+
+    # 2. Reindex and Forward Fill Hourly data to match Intraday frequency
+    # This ensures an hourly DA price of £60 at 10:00 is also applied to 10:15, 10:30, 10:45
+    da_prices_up = da_prices.reindex(master_index).ffill()
+    demand_up = demand.reindex(master_index).ffill()
+    wind_up = wind.reindex(master_index).ffill()
+    solar_up = solar.reindex(master_index).ffill()
+    flows_up = flows.reindex(master_index).ffill()
+    generation_up = generation.reindex(master_index).ffill()
+
+    # 3. Join on the higher frequency index
     df = (
-        da_prices
-        .join(intraday_prices, how="inner")
-        .join(demand, how="left")
-        .join(wind, how="left")
-        .join(solar, how="left")
-        .join(flows, how="left")
-        .join(generation, how="left")
+        intraday_prices  # Start with ID as the left/base df
+        .join(da_prices_up, how="left")
+        .join(demand_up, how="left")
+        .join(wind_up, how="left")
+        .join(solar_up, how="left")
+        .join(flows_up, how="left")
+        .join(generation_up, how="left")
     )
 
+    # --- Rest of your cleaning and feature engineering ---
     df = clean_base_dataframe(df, price_cols, tz, index_name)
     df = add_calendar_features(df)
+    
+    # Update: Include High/Low/Close spread features if available in your df_intraday
+    # These are high-value for probabilistic volatility forecasting
+    if "intraday_high" in df.columns and "intraday_low" in df.columns:
+        df["id_range"] = df["intraday_high"] - df["intraday_low"]
+
     df = add_wind_penetration(df, "wind_outturn", "demand_actual")
-    df = add_renewable_ramps(df, "wind_outturn", [1, 4, 12])
-    df = add_renewable_ramps(df, "solar_outturn", [1, 4])
-    df = add_rolling_features(df, ["intraday_wap", "da_price"], [4, 12, 24])
+    df = add_renewable_ramps(df, "wind_outturn", [2, 4, 8, 24, 48]) # Adjusted windows for HH
+    df = add_renewable_ramps(df, "solar_outturn", [2, 4, 8, 24 , 48]) # Adjusted windows for HH
+    df = add_rolling_features(df, ["intraday_wap", "da_price"], [1, 2, 3, 4, 24, 48])
 
-    # --------------------------------------------------
-    # Exogenous lags
-    # --------------------------------------------------
+    # Lag features (Note: lag 1 is now 30 mins, lag 48 is 24 hours)
     for var in ["demand_actual", "wind_outturn"]:
-        df[f"{var}_lag1"] = df[var].shift(1)
-        df[f"{var}_lag24"] = df[var].shift(24)
+        df[f"{var}_lag1"] = df[var].shift(2)
+        df[f"{var}_lag48"] = df[var].shift(48) # 24h lag for Half-Hourly
 
-    df["solar_outturn_lag1"] = df["solar_outturn"].shift(1)
+    df["solar_outturn_lag1"] = df["solar_outturn"].shift(2)
     df["id_da_spread"] = df["intraday_wap"] - df["da_price"]
-    # --------------------------------------------------
+    
     # Variance regressors
-    # --------------------------------------------------
     df["abs_demand_error"] = df["demand_error"].abs()
     df["abs_wind_error"] = df["wind_error"].abs()
     df["abs_solar_error"] = df["solar_error"].abs()

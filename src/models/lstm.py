@@ -133,6 +133,54 @@ class Seq2SeqQuantileLSTM(nn.Module):
         }
 
 
+class Seq2SeqJumpQuantileLSTM(nn.Module):
+
+    def __init__(self, cfg: LSTMConfig):
+        super().__init__()
+        self.cfg = cfg
+        self.quantiles = cfg.quantiles
+        self.n_q = len(cfg.quantiles)
+
+        self.encoder = nn.LSTM(
+            input_size=cfg.input_size_past,
+            hidden_size=cfg.hidden_size,
+            num_layers=cfg.num_layers,
+            dropout=cfg.dropout if cfg.num_layers > 1 else 0.0,
+            batch_first=True,
+        )
+
+        self.decoder = nn.LSTM(
+            input_size=cfg.input_size_future,
+            hidden_size=cfg.hidden_size,
+            num_layers=cfg.num_layers,
+            dropout=cfg.dropout if cfg.num_layers > 1 else 0.0,
+            batch_first=True,
+        )
+
+        # Smooth quantiles
+        self.smooth_head = nn.Linear(cfg.hidden_size, self.n_q)
+
+        # Jump probability
+        self.jump_prob_head = nn.Linear(cfg.hidden_size, 1)
+
+        # Jump magnitude (mean)
+        self.jump_size_head = nn.Linear(cfg.hidden_size, 1)
+
+    def forward(self, encoder_x, decoder_x):
+
+        _, (h, c) = self.encoder(encoder_x)
+        dec_out, _ = self.decoder(decoder_x, (h, c))
+
+        smooth_q = self.smooth_head(dec_out)
+
+        jump_prob = torch.sigmoid(
+            self.jump_prob_head(dec_out).squeeze(-1)
+        )
+
+        jump_size = self.jump_size_head(dec_out).squeeze(-1)
+
+        return smooth_q, jump_prob, jump_size
+
 # ======================================================
 # LOSSES
 # ======================================================
@@ -180,4 +228,17 @@ def lstm_from_hydra(cfg: DictConfig) -> Seq2SeqQuantileLSTM:
         predict_spike_prob=cfg.model.architecture.outputs.spike_probability,
     )
 
-    return Seq2SeqQuantileLSTM(model_cfg)
+    return Seq2SeqQuantileLSTM(model_cfg)\
+    
+def jump_lstm_from_hydra(cfg: DictConfig) -> Seq2SeqJumpQuantileLSTM:
+    model_cfg = LSTMConfig(
+        input_size_past=len(cfg.model.data.past_features),
+        input_size_future=len(cfg.model.data.known_future_features),
+        hidden_size=cfg.model.architecture.encoder.hidden_size,
+        num_layers=cfg.model.architecture.encoder.num_layers,
+        dropout=cfg.model.architecture.encoder.dropout,
+        quantiles=list(cfg.model.architecture.outputs.quantiles),
+        predict_spike_prob=True,  # Always predict jump probability in jump LSTM
+    )
+
+    return Seq2SeqJumpQuantileLSTM(model_cfg)

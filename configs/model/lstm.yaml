@@ -6,22 +6,24 @@ data:
   batch_size: 64
 
   past_features:
-    - intraday_wap
-    - da_price
-    - wind_outturn
-    - solar_outturn
-    - demand_actual
-    - wind_error
-    - solar_error
-    - demand_error
+    - "intraday_wap"          # Target auto-correlation
+    - "id_da_spread"          # Relative market value
+    - "wind_outturn"          # Realized renewables
+    - "solar_outturn"         # Realized renewables
+    - "demand_actual"         # Realized load
+    - "gen_ccgt"              # Paper: Crucial for "Bridge" price regimes
+    - "wind_outturn_delta_1"  # Momentum of generation changes
+    - "intraday_wap_rollstd_8" # Recent volatility/choppiness
 
   known_future_features:
-    - da_price
-    - hour_sin
-    - hour_cos
-    - dow_sin
-    - dow_cos
-    - is_weekend
+    - "da_price"              # Known benchmark for target hour
+    - "demand_da_forecast"    # Scheduled system load
+    - "wind_forecast_ng"      # Expected renewable pressure
+    - "solar_forecast_ng"     # Expected renewable pressure
+    - "hour_sin"              # Diurnal seasonality
+    - "hour_cos"              # Diurnal seasonality
+    - "is_weekend"            # Industrial load cycle
+    - "is_peak_15_18"         # tightness window
 
 spikes:
   # NOTE: This is used by Seq2SeqDataset spike labeling + evaluation thresholds
@@ -36,7 +38,6 @@ architecture:
 
   outputs:
     quantiles: [0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99]
-    spike_probability: true
 
 training:
   learning_rate: 0.0001

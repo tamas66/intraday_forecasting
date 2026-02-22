@@ -47,7 +47,6 @@ class GarchEVTConfig:
 
 @dataclass
 class GPDTail:
-    # scipy genpareto parameterization: c, loc, scale
     c: float
     loc: float
     scale: float
@@ -55,7 +54,6 @@ class GPDTail:
     def rvs(self, size: int, rng: np.random.Generator) -> np.ndarray:
         if genpareto is None:
             raise ImportError("scipy is required for EVT (genpareto). Install scipy.")
-        # scipy's rvs uses global RNG unless random_state passed
         return genpareto.rvs(self.c, loc=self.loc, scale=self.scale, size=size, random_state=rng)
 
 
@@ -123,8 +121,6 @@ def apply_evt_to_standardized_samples(
     """
     Replace the extreme parts of z_samples with draws from fitted GPD tails,
     preserving sign and threshold continuity.
-
-    z_samples: shape (...,)
     """
     z = np.asarray(z_samples, dtype=float).copy()
 

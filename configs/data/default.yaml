@@ -22,6 +22,7 @@ features:
   # Prices & spreads
   - intraday_wap
   - da_price
+  - id_da_spread
 
   # Wind fundamentals
   - wind_outturn
@@ -52,57 +53,57 @@ features:
   - "abs_id_da_spread"
   - "is_peak_15_18"
 
-extended_features:
-  # Prices & spreads
-  - intraday_wap
-  - da_price
+  extended_features:
+    # Prices & spreads
+    - intraday_wap
+    - da_price
+    - id_da_spread
+    
+    # Demand (level + key forecast)
+    - demand_actual
+    - demand_da_forecast
 
-  # Demand (level + key forecast)
-  - demand_actual
-  - demand_da_forecast
+    # Wind fundamentals
+    - wind_outturn
+    - wind_forecast_ng
+    - wind_penetration
+    - wind_outturn_delta_2
+    - wind_outturn_delta_4
 
-  # Wind fundamentals
-  - wind_outturn
-  - wind_forecast_ng
-  - wind_capacity
-  - wind_penetration
-  - wind_outturn_delta_1
-  - wind_outturn_delta_4
+    # Solar fundamentals
+    - solar_outturn
+    - solar_forecast_ng
+    - solar_capacity
+    - solar_outturn_delta_2
+    - solar_outturn_delta_4
 
-  # Solar fundamentals
-  - solar_outturn
-  - solar_forecast_ng
-  - solar_capacity
-  - solar_outturn_delta_1
-  - solar_outturn_delta_4
+    # Conventional generation stack (coarse)
+    - gen_ccgt
+    - gen_nuclear
+    - gen_biomass
+    - gen_hydro
+    - gen_total_conventional
 
-  # Conventional generation stack (coarse)
-  - gen_ccgt
-  - gen_nuclear
-  - gen_biomass
-  - gen_hydro
-  - gen_total_conventional
+    # Interconnection & foreign prices
+    - interconnector_total
+    - price_france
+    - price_netherlands
+    - price_norway
+    - price_isem
 
-  # Interconnection & foreign prices
-  - interconnector_total
-  - price_france
-  - price_netherlands
-  - price_norway
-  - price_isem
+    # Seasonality / calendar
+    - hour_sin
+    - hour_cos
+    - dow_sin
+    - dow_cos
+    - is_weekend
 
-  # Seasonality / calendar
-  - hour_sin
-  - hour_cos
-  - dow_sin
-  - dow_cos
-  - is_weekend
-
-  # Rolling statistics for price dynamics
-  - intraday_wap_rollmean_4
-  - intraday_wap_rollstd_4
-  - intraday_wap_rollmean_12
-  - intraday_wap_rollstd_12
-  - da_price_rollmean_4
-  - da_price_rollstd_4
-  - da_price_rollmean_12
-  - da_price_rollstd_12
+    # Rolling statistics for price dynamics
+    - intraday_wap_rollmean_8
+    - intraday_wap_rollstd_8
+    - intraday_wap_rollmean_24
+    - intraday_wap_rollstd_24
+    - da_price_rollmean_8
+    - da_price_rollstd_8
+    - da_price_rollmean_24
+    - da_price_rollstd_24
